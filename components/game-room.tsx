@@ -7,12 +7,12 @@ import { CircularGameLayout } from "@/components/circular-game-layout"
 import { generateDeck, shuffleDeck, calculatePoints, getComputerMove } from "@/lib/game-utils"
 import { PlayerScoreboard } from "@/components/player-scoreboard"
 import { RoomSharing } from "@/components/room-sharing"
-import { Mic, MicOff, Volume2, VolumeX } from "lucide-react"
+import { Mic, MicOff, Volume2, VolumeX, Play, Users } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { VoiceControl } from "@/components/voice-control"
 
-// Add playerId and broadcastChannel to the props
-export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, broadcastChannel, wsClient }) {
+export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, socketClient }) {
+  const [currentRoom, setCurrentRoom] = useState(room)
   const [deck, setDeck] = useState([])
   const [discardPile, setDiscardPile] = useState([])
   const [playerHands, setPlayerHands] = useState({})
@@ -20,7 +20,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0)
   const [gameStarted, setGameStarted] = useState(false)
   const [gameMessage, setGameMessage] = useState("Waiting for players...")
-  const [direction, setDirection] = useState(1) // 1 for clockwise, -1 for counter-clockwise
+  const [direction, setDirection] = useState(1)
   const [playerSaidUno, setPlayerSaidUno] = useState({})
   const [animatingCard, setAnimatingCard] = useState(null)
   const [drawAnimation, setDrawAnimation] = useState(false)
@@ -37,6 +37,61 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
 
   // Audio context for sound effects
   const audioContextRef = useRef(null)
+
+  // Update room state when prop changes
+  useEffect(() => {
+    if (room) {
+      setCurrentRoom(room)
+      console.log("🏠 Room updated:", room)
+    }
+  }, [room])
+
+  // Set up Socket.IO listeners for real-time updates
+  useEffect(() => {
+    if (socketClient && gameMode === "multi") {
+      console.log("🔌 Setting up Socket.IO listeners")
+
+      const handlePlayerJoined = (data) => {
+        console.log("👋 Player joined:", data)
+        setCurrentRoom(data.room)
+        setGameMessage(`${data.player.name} joined the room!`)
+      }
+
+      const handlePlayerLeft = (data) => {
+        console.log("👋 Player left:", data)
+        setCurrentRoom(data.room)
+        setGameMessage(`${data.player.name} left the room`)
+      }
+
+      const handleGameStarted = (data) => {
+        console.log("🎮 Game started:", data)
+        setGameStarted(true)
+        setGameMessage("Game started!")
+      }
+
+      const handleGameUpdate = (data) => {
+        console.log("🎮 Game update:", data)
+        // Handle real-time game updates here
+        if (data.action === "CARD_PLAYED") {
+          setGameMessage(`${data.playerName} played a card`)
+        }
+      }
+
+      // Add listeners
+      socketClient.on("player-joined", handlePlayerJoined)
+      socketClient.on("player-left", handlePlayerLeft)
+      socketClient.on("game-started", handleGameStarted)
+      socketClient.on("game-update", handleGameUpdate)
+
+      // Cleanup listeners on unmount
+      return () => {
+        socketClient.off("player-joined", handlePlayerJoined)
+        socketClient.off("player-left", handlePlayerLeft)
+        socketClient.off("game-started", handleGameStarted)
+        socketClient.off("game-update", handleGameUpdate)
+      }
+    }
+  }, [socketClient, gameMode])
 
   // Initialize audio context
   useEffect(() => {
@@ -90,15 +145,15 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
 
   // Initialize game when room changes
   useEffect(() => {
-    if (room) {
+    if (currentRoom) {
       const initialScores = {}
-      room.players.forEach((player) => {
+      currentRoom.players.forEach((player) => {
         initialScores[player.name] = 0
       })
       setPlayerScores(initialScores)
 
       const initialUnoState = {}
-      room.players.forEach((player) => {
+      currentRoom.players.forEach((player) => {
         initialUnoState[player.name] = false
       })
       setPlayerSaidUno(initialUnoState)
@@ -106,7 +161,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
       // Add computer players for single player mode
       if (gameMode === "single") {
         const cpuPlayers = []
-        const cpuCount = room.maxPlayers - 1
+        const cpuCount = currentRoom.maxPlayers - 1
 
         for (let i = 0; i < cpuCount; i++) {
           cpuPlayers.push({
@@ -119,7 +174,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
         setComputerPlayers(cpuPlayers)
       }
     }
-  }, [room, gameMode])
+  }, [currentRoom, gameMode])
 
   // Handle voice commands
   const handleVoiceCommand = (command) => {
@@ -147,15 +202,30 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
     }
   }
 
+  // Check if current player is the host
+  const isHost = () => {
+    return currentRoom && (currentRoom.host === playerId || gameMode === "single")
+  }
+
+  // Check if game can start
+  const canStartGame = () => {
+    if (gameMode === "single") return true
+    if (!currentRoom) return false
+    return currentRoom.players.length >= 2 && currentRoom.players.length <= currentRoom.maxPlayers
+  }
+
   // Start a new game
   const startGame = () => {
+    console.log("🎮 Starting game...")
+
     const newDeck = generateDeck()
     const shuffledDeck = shuffleDeck(newDeck)
 
     const hands = {}
     let updatedDeck = [...shuffledDeck]
 
-    const allPlayers = gameMode === "single" ? [{ id: "host", name: playerName }, ...computerPlayers] : room.players
+    const allPlayers =
+      gameMode === "single" ? [{ id: "host", name: playerName }, ...computerPlayers] : currentRoom.players
 
     allPlayers.forEach((player) => {
       const { cards, remainingDeck } = dealCardsToPlayer(updatedDeck, 7)
@@ -183,79 +253,27 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
     setCanStack(false)
     setShowEndGameCards(false)
 
-    sendGameAction("START_GAME", {
-      deck: updatedDeck,
-      playerHands: hands,
-      discardPile: [firstCard],
-      currentPlayerIndex: 0,
-      direction: 1,
-      playerSaidUno: initialUnoState,
-      stackedCards: [],
-      canStack: false,
-    })
+    // Notify other players via Socket.IO
+    if (socketClient && gameMode === "multi") {
+      socketClient.startGame({
+        roomId: currentRoom.id,
+        gameState: {
+          deck: updatedDeck,
+          playerHands: hands,
+          discardPile: [firstCard],
+          currentPlayerIndex: 0,
+          direction: 1,
+          playerSaidUno: initialUnoState,
+          stackedCards: [],
+          canStack: false,
+        },
+      })
+    }
 
     if (gameMode === "single" && allPlayers[0].name !== playerName) {
       setTimeout(runComputerTurns, 1000)
     }
   }
-
-  // Add real-time game state synchronization
-  useEffect(() => {
-    if (broadcastChannel && gameMode === "multi") {
-      const handleGameMessage = (event) => {
-        const { type, data } = event.data
-
-        switch (type) {
-          case "GAME_STATE_UPDATE":
-            if (data.roomId === room.id && data.playerId !== playerId) {
-              // Update game state from other players
-              if (data.gameState) {
-                setPlayerHands(data.gameState.playerHands)
-                setDiscardPile(data.gameState.discardPile)
-                setCurrentPlayerIndex(data.gameState.currentPlayerIndex)
-                setGameMessage(data.gameState.gameMessage)
-              }
-            }
-            break
-
-          case "CARD_PLAYED":
-            if (data.roomId === room.id && data.playerId !== playerId) {
-              setGameMessage(`${data.playerName} played a ${data.card.color} ${data.card.value}`)
-              playCardSound()
-            }
-            break
-        }
-      }
-
-      broadcastChannel.onmessage = handleGameMessage
-    }
-  }, [broadcastChannel, room.id, playerId])
-
-  // Broadcast game state changes
-  const broadcastGameState = () => {
-    if (broadcastChannel && gameMode === "multi") {
-      broadcastChannel.postMessage({
-        type: "GAME_STATE_UPDATE",
-        data: {
-          roomId: room.id,
-          playerId,
-          gameState: {
-            playerHands,
-            discardPile,
-            currentPlayerIndex,
-            gameMessage,
-          },
-        },
-      })
-    }
-  }
-
-  // Call broadcastGameState after important game state changes
-  useEffect(() => {
-    if (gameStarted) {
-      broadcastGameState()
-    }
-  }, [playerHands, discardPile, currentPlayerIndex])
 
   const dealCardsToPlayer = (deck, count) => {
     const cards = []
@@ -271,7 +289,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
   }
 
   const getAllPlayers = () => {
-    return gameMode === "single" ? [{ id: "host", name: playerName }, ...computerPlayers] : room.players
+    return gameMode === "single" ? [{ id: "host", name: playerName }, ...computerPlayers] : currentRoom.players
   }
 
   const playCard = (cardIndex) => {
@@ -325,7 +343,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
         }
 
         // Handle stacking
-        if (room.stackingEnabled && (card.value === "draw2" || card.value === "wild4")) {
+        if (currentRoom.settings?.stackingEnabled && (card.value === "draw2" || card.value === "wild4")) {
           const newStackedCards = [...stackedCards, card]
           setStackedCards(newStackedCards)
 
@@ -460,7 +478,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
         }
 
         // Handle stacking
-        if (room.stackingEnabled && (card.value === "draw2" || card.value === "wild4")) {
+        if (currentRoom.settings?.stackingEnabled && (card.value === "draw2" || card.value === "wild4")) {
           const newStackedCards = [...stackedCards, card]
           setStackedCards(newStackedCards)
 
@@ -555,7 +573,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
 
     // Check if player has reached the target score
     setTimeout(() => {
-      if (newScores[winner] >= room.pointsToWin) {
+      if (newScores[winner] >= currentRoom.settings?.pointsToWin) {
         setGameWinner(winner)
         setGameMessage(`${winner} wins the game with ${newScores[winner]} points!`)
       } else {
@@ -765,21 +783,27 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
     setSoundEnabled(!soundEnabled)
   }
 
-  // Update the sendGameAction function to handle connection issues
+  // Send game action via Socket.IO
   const sendGameAction = (action, data) => {
-    if (wsClient && wsClient.isConnected() && !room.isOffline && !room.isInstant) {
+    if (socketClient && socketClient.isConnected() && gameMode === "multi") {
       try {
-        wsClient.send("GAME_ACTION", {
-          roomId: room.id,
-          playerId,
-          playerName,
+        socketClient.gameAction({
+          roomId: currentRoom.id,
           action,
-          data,
+          gameData: data,
         })
       } catch (error) {
         console.error("Failed to send game action:", error)
       }
     }
+  }
+
+  if (!currentRoom) {
+    return (
+      <div className="w-full max-w-6xl text-center">
+        <p className="text-white text-xl">Loading room...</p>
+      </div>
+    )
   }
 
   return (
@@ -790,8 +814,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
       )}
 
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold text-white">{room.name}</h2>
-        {gameMode === "multi" && !gameStarted && <RoomSharing room={room} />}
+        <h2 className="text-2xl font-bold text-white">{currentRoom.name}</h2>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <Button
@@ -824,9 +847,23 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
         </Alert>
       )}
 
+      {/* Room sharing - always show for multiplayer */}
+      {gameMode === "multi" && !currentRoom.isInstant && <RoomSharing room={currentRoom} />}
+
       {!gameStarted && !roundWinner && !gameWinner && (
         <div className="bg-white/10 p-6 rounded-lg mb-6">
-          <h3 className="text-xl font-medium text-white mb-4">Players in Room</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-medium text-white flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Players in Room ({currentRoom.players.length}/{currentRoom.maxPlayers})
+            </h3>
+            {gameMode === "multi" && (
+              <div className="text-sm text-white/80">
+                Room Code: <span className="font-bold text-yellow-300">{currentRoom.code}</span>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {gameMode === "single" ? (
               <>
@@ -842,34 +879,55 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
                 ))}
               </>
             ) : (
-              room.players.map((player, index) => (
+              currentRoom.players.map((player, index) => (
                 <div key={index} className="bg-white/20 p-3 rounded-lg text-center">
                   <p className="text-white font-medium">{player.name}</p>
-                  {player.name === room.players[0].name && <span className="text-xs text-yellow-300">(Host)</span>}
+                  {player.id === currentRoom.host && <span className="text-xs text-yellow-300">(Host)</span>}
                   {player.name === playerName && <span className="text-xs text-green-300">(You)</span>}
                 </div>
               ))
             )}
           </div>
 
-          {(playerName === room.players[0].name || gameMode === "single") && (
-            <Button
-              onClick={startGame}
-              className="w-full bg-red-600 hover:bg-red-700 text-white"
-              disabled={gameMode === "multi" && room.players.length < 2}
-            >
-              {gameMode === "multi" && room.players.length < 2 ? "Waiting for players..." : "Start Game"}
+          {/* Game start button */}
+          {isHost() && canStartGame() && (
+            <Button onClick={startGame} className="w-full bg-green-600 hover:bg-green-700 text-white text-lg py-3 mb-4">
+              <Play className="mr-2 h-5 w-5" />
+              Start Game
             </Button>
           )}
 
-          {room.stackingEnabled && (
-            <div className="mt-4 p-3 bg-white/5 rounded-lg">
-              <p className="text-sm text-white">
-                <span className="font-bold">Card Stacking Enabled:</span> Players can stack Draw 2 on Draw 2, Wild Draw
-                4 on Wild Draw 4, and Wild Draw 4 on Draw 2
+          {/* Waiting message */}
+          {!canStartGame() && gameMode === "multi" && (
+            <div className="text-center p-4 bg-yellow-500/20 rounded-lg mb-4">
+              <p className="text-yellow-200 font-medium">
+                Waiting for more players... ({currentRoom.players.length}/{currentRoom.maxPlayers})
               </p>
+              <p className="text-yellow-200/80 text-sm mt-1">Need at least 2 players to start the game</p>
             </div>
           )}
+
+          {!isHost() && gameMode === "multi" && (
+            <div className="text-center p-4 bg-blue-500/20 rounded-lg mb-4">
+              <p className="text-blue-200 font-medium">Waiting for host to start the game...</p>
+            </div>
+          )}
+
+          {/* Game settings display */}
+          <div className="mt-4 p-3 bg-white/5 rounded-lg">
+            <h4 className="text-sm font-bold text-white mb-2">Game Settings:</h4>
+            <div className="grid grid-cols-2 gap-4 text-sm text-white/80">
+              <div>
+                🎯 Points to Win: <span className="text-yellow-300">{currentRoom.settings?.pointsToWin || 500}</span>
+              </div>
+              <div>
+                📚 Card Stacking:{" "}
+                <span className="text-yellow-300">
+                  {currentRoom.settings?.stackingEnabled ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -878,12 +936,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
           <h3 className="text-2xl font-bold text-center text-yellow-300 mb-4">{roundWinner} wins the round!</h3>
 
           <PlayerScoreboard
-            players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : room.players}
+            players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : currentRoom.players}
             scores={playerScores}
-            pointsToWin={room.pointsToWin}
+            pointsToWin={currentRoom.settings?.pointsToWin || 500}
           />
 
-          {(playerName === room.players[0].name || gameMode === "single") && (
+          {isHost() && (
             <Button onClick={startNewRound} className="w-full mt-4 bg-red-600 hover:bg-red-700 text-white">
               Start Next Round
             </Button>
@@ -896,12 +954,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
           <h3 className="text-3xl font-bold text-center text-yellow-300 mb-4">{gameWinner} wins the game!</h3>
 
           <PlayerScoreboard
-            players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : room.players}
+            players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : currentRoom.players}
             scores={playerScores}
-            pointsToWin={room.pointsToWin}
+            pointsToWin={currentRoom.settings?.pointsToWin || 500}
           />
 
-          {(playerName === room.players[0].name || gameMode === "single") && (
+          {isHost() && (
             <Button onClick={startNewRound} className="w-full mt-4 bg-red-600 hover:bg-red-700 text-white">
               Start New Game
             </Button>
@@ -922,17 +980,15 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, br
           </div>
 
           <PlayerScoreboard
-            players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : room.players}
+            players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : currentRoom.players}
             scores={playerScores}
-            pointsToWin={room.pointsToWin}
+            pointsToWin={currentRoom.settings?.pointsToWin || 500}
           />
-
-          {gameMode === "multi" && <RoomSharing room={room} />}
 
           {/* Circular game layout */}
           <div className="mt-4">
             <CircularGameLayout
-              players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : room.players}
+              players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : currentRoom.players}
               playerHands={playerHands}
               playerName={playerName}
               currentPlayer={getCurrentPlayerName()}

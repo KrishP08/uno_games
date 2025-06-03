@@ -36,8 +36,10 @@ export default function UnoGame() {
     setStatusMessage("🔌 Connecting to UNO game server...")
 
     try {
-      // Try to connect to the Socket.IO server
+      // Get server URL from environment variable or fallback
       const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001"
+
+      console.log("🔗 Connecting to server:", serverUrl)
 
       socketClient.current = new SocketClient(serverUrl)
       setupSocketHandlers()
@@ -82,6 +84,7 @@ export default function UnoGame() {
     })
 
     socketClient.current.on("player-joined", (data) => {
+      console.log("👋 Player joined event:", data)
       if (currentRoom && currentRoom.id === data.room.id) {
         setCurrentRoom(data.room)
         setStatusMessage(`👋 ${data.player.name} joined the room!`)
@@ -89,6 +92,7 @@ export default function UnoGame() {
     })
 
     socketClient.current.on("player-left", (data) => {
+      console.log("👋 Player left event:", data)
       if (currentRoom && currentRoom.id === data.room.id) {
         setCurrentRoom(data.room)
         setStatusMessage(`👋 ${data.player.name} left the room`)
@@ -170,6 +174,7 @@ export default function UnoGame() {
         playerId,
         playerName,
       })
+      setStatusMessage("Joining room... Please wait.")
     } else {
       // Offline mode fallback
       const room = rooms.find((r) => r.id === roomId)
@@ -193,6 +198,7 @@ export default function UnoGame() {
         playerId,
         playerName,
       })
+      setStatusMessage("Joining room... Please wait.")
       return { success: true }
     } else {
       // Offline mode fallback
