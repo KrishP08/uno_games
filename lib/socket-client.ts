@@ -12,28 +12,49 @@ export class SocketClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        console.log("🔗 Attempting to connect to:", this.url)
+
         this.socket = io(this.url, {
           transports: ["websocket", "polling"],
-          timeout: 10000,
+          timeout: 20000, // Increased timeout for Render
+          withCredentials: false,
+          forceNew: true,
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
         })
 
         this.socket.on("connect", () => {
           console.log("✅ Connected to UNO game server")
+          console.log("🆔 Socket ID:", this.socket?.id)
           resolve()
         })
 
         this.socket.on("connect_error", (error) => {
-          console.error("❌ Connection error:", error)
+          console.error("❌ Connection error:", error.message)
           reject(error)
         })
 
         this.socket.on("disconnect", (reason) => {
           console.log("🔌 Disconnected from server:", reason)
+          // Don't auto-reconnect on manual disconnect
+          if (reason !== "io client disconnect") {
+            console.log("🔄 Attempting to reconnect...")
+          }
+        })
+
+        this.socket.on("reconnect", (attemptNumber) => {
+          console.log("✅ Reconnected after", attemptNumber, "attempts")
+        })
+
+        this.socket.on("reconnect_error", (error) => {
+          console.error("❌ Reconnection failed:", error.message)
         })
 
         // Set up message handlers
         this.setupMessageHandlers()
       } catch (error) {
+        console.error("❌ Failed to create socket:", error)
         reject(error)
       }
     })
@@ -56,6 +77,7 @@ export class SocketClient {
 
     events.forEach((event) => {
       this.socket!.on(event, (data) => {
+        console.log(`📨 Received ${event}:`, data)
         this.handleMessage(event, data)
       })
     })
@@ -92,6 +114,7 @@ export class SocketClient {
   // Emit events to server
   emit(event: string, data?: any) {
     if (this.socket && this.socket.connected) {
+      console.log(`📤 Sending ${event}:`, data)
       this.socket.emit(event, data)
     } else {
       console.warn("⚠️ Socket not connected, cannot emit:", event)
@@ -106,6 +129,7 @@ export class SocketClient {
   // Disconnect from server
   disconnect() {
     if (this.socket) {
+      console.log("🔌 Manually disconnecting from server")
       this.socket.disconnect()
       this.socket = null
     }

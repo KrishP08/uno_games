@@ -65,6 +65,17 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
       const handleGameStarted = (data) => {
         console.log("🎮 Game started:", data)
+        if (data.gameState) {
+          // Sync game state from server
+          setDeck(data.gameState.deck || [])
+          setPlayerHands(data.gameState.playerHands || {})
+          setDiscardPile(data.gameState.discardPile || [])
+          setCurrentPlayerIndex(data.gameState.currentPlayerIndex || 0)
+          setDirection(data.gameState.direction || 1)
+          setPlayerSaidUno(data.gameState.playerSaidUno || {})
+          setStackedCards(data.gameState.stackedCards || [])
+          setCanStack(data.gameState.canStack || false)
+        }
         setGameStarted(true)
         setGameMessage("Game started!")
       }
@@ -233,13 +244,34 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       updatedDeck = remainingDeck
     })
 
-    const firstCard = updatedDeck.pop()
+    // Get first card that's not a wild card
+    let firstCard
+    do {
+      firstCard = updatedDeck.pop()
+    } while (firstCard && firstCard.color === "wild" && updatedDeck.length > 0)
+
+    // If we couldn't find a non-wild card, use any card
+    if (!firstCard) {
+      firstCard = { color: "red", value: "1" } // Fallback card
+    }
 
     const initialUnoState = {}
     allPlayers.forEach((player) => {
       initialUnoState[player.name] = false
     })
 
+    const gameState = {
+      deck: updatedDeck,
+      playerHands: hands,
+      discardPile: [firstCard],
+      currentPlayerIndex: 0,
+      direction: 1,
+      playerSaidUno: initialUnoState,
+      stackedCards: [],
+      canStack: false,
+    }
+
+    // Set local state
     setDeck(updatedDeck)
     setPlayerHands(hands)
     setDiscardPile([firstCard])
@@ -254,20 +286,16 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setShowEndGameCards(false)
 
     // Notify other players via Socket.IO
-    if (socketClient && gameMode === "multi") {
-      socketClient.startGame({
-        roomId: currentRoom.id,
-        gameState: {
-          deck: updatedDeck,
-          playerHands: hands,
-          discardPile: [firstCard],
-          currentPlayerIndex: 0,
-          direction: 1,
-          playerSaidUno: initialUnoState,
-          stackedCards: [],
-          canStack: false,
-        },
-      })
+    if (socketClient && socketClient.isConnected() && gameMode === "multi") {
+      try {
+        console.log("📡 Sending game start to server...")
+        socketClient.emit("start-game", {
+          roomId: currentRoom.id,
+          gameState,
+        })
+      } catch (error) {
+        console.error("❌ Failed to send game start:", error)
+      }
     }
 
     if (gameMode === "single" && allPlayers[0].name !== playerName) {
@@ -300,6 +328,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     const card = playerHands[playerName][cardIndex]
     const topCard = discardPile[discardPile.length - 1]
+
+    // Safety check for card and topCard
+    if (!card || !topCard) {
+      console.error("❌ Invalid card or top card:", { card, topCard })
+      return
+    }
 
     const canPlayCard = canStack
       ? (card.value === "draw2" && (topCard.value === "draw2" || stackedCards.some((c) => c.value === "draw2"))) ||
@@ -424,6 +458,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   const playComputerTurn = (computerPlayer) => {
     const topCard = discardPile[discardPile.length - 1]
     const computerHand = playerHands[computerPlayer.name] || []
+
+    // Safety check
+    if (!topCard) {
+      console.error("❌ No top card available for computer turn")
+      return
+    }
 
     // Get computer move based on difficulty
     const { move, cardIndex, chosenColor } = getComputerMove(computerHand, topCard, canStack, computerPlayer.difficulty)
@@ -573,7 +613,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     // Check if player has reached the target score
     setTimeout(() => {
-      if (newScores[winner] >= currentRoom.settings?.pointsToWin) {
+      if (newScores[winner] >= (currentRoom.settings?.pointsToWin || 500)) {
         setGameWinner(winner)
         setGameMessage(`${winner} wins the game with ${newScores[winner]} points!`)
       } else {
@@ -588,6 +628,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   // Start a new round
   const startNewRound = () => {
     setShowEndGameCards(false)
+    setRoundWinner(null)
     startGame()
   }
 
@@ -743,7 +784,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   // Handle player drawing a card
   const handleDrawCard = () => {
     const allPlayers = getAllPlayers()
-    const currentPlayer = allPlayers[currentPlayerIndex].name
+    const currentPlayer = allPlayers[currentPlayerIndex]?.name
 
     // Only allow the current player to draw
     if (currentPlayer !== playerName || !gameStarted || canStack) return
@@ -796,6 +837,15 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         console.error("Failed to send game action:", error)
       }
     }
+  }
+
+  // Get the top card safely
+  const getTopCard = () => {
+    if (discardPile.length > 0) {
+      return discardPile[discardPile.length - 1]
+    }
+    // Fallback card if no discard pile
+    return { color: "red", value: "1" }
   }
 
   if (!currentRoom) {
@@ -994,7 +1044,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               currentPlayer={getCurrentPlayerName()}
               playerSaidUno={playerSaidUno}
               showEndGameCards={showEndGameCards}
-              topCard={discardPile[discardPile.length - 1]}
+              topCard={getTopCard()}
               deckCount={deck.length}
               onDrawCard={handleDrawCard}
               animatingCard={animatingCard}
