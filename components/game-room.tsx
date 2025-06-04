@@ -287,6 +287,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 stackedCards: newStackedCards,
                 canStack: newCanStack,
                 currentPlayerIndex: newPlayerIndex,
+                lastPlayedCard,
               } = data.data
 
               // Update stacked cards
@@ -299,8 +300,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
               // Update game message for stacking
               if (newStackedCards && newStackedCards.length > 0) {
-                const lastCard = newStackedCards[newStackedCards.length - 1]
-                const totalCards = newStackedCards.reduce((total, c) => total + (c.value === "draw2" ? 2 : 4), 0)
+                const lastCard = lastPlayedCard || newStackedCards[newStackedCards.length - 1]
+                const totalCards = newStackedCards.reduce((total, c) => {
+                  return total + (c.value === "draw2" ? 2 : 4)
+                }, 0)
 
                 setGameMessage(
                   `${data.playerName} stacked a ${lastCard.color} ${lastCard.value}! Total to draw: ${totalCards}`,
@@ -616,6 +619,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     setShowColorSelector(false)
 
+    // Create a new card with the selected color
     const card = { ...pendingWildCard, color }
 
     // Send the wild color selection specifically
@@ -635,7 +639,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     // Check if player should have said UNO
     if (newHand.length === 1 && !playerSaidUno[playerName]) {
-      // Show UNO reminder instead of automatically drawing cards
       showUnoReminder()
     }
 
@@ -656,7 +659,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       sendGameAction("SPECIAL_CARD", { card })
       sendGameAction("TURN_CHANGE", { currentPlayerIndex: skipIndex })
 
-      if (gameMode === "single") {
+      if (gameMode === "single" && allPlayers[skipIndex].name !== playerName) {
         setTimeout(runComputerTurns, 1000)
       }
     } else {
@@ -671,7 +674,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       sendGameAction("SPECIAL_CARD", { card })
       sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
 
-      if (gameMode === "single") {
+      if (gameMode === "single" && getAllPlayers()[nextPlayerIndex].name !== playerName) {
         setTimeout(runComputerTurns, 1000)
       }
     }
@@ -712,13 +715,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       return
     }
 
-    // Fix for stacking logic
+    // Improved stacking logic
     const canPlayCard = canStack
-      ? (card.value === "draw2" && (topCard.value === "draw2" || stackedCards.some((c) => c.value === "draw2"))) ||
-        (card.value === "wild4" &&
-          (topCard.value === "wild4" ||
-            topCard.value === "draw2" ||
-            stackedCards.some((c) => c.value === "wild4" || c.value === "draw2")))
+      ? (card.value === "draw2" && topCard.value === "draw2") ||
+        (card.value === "wild4" && (topCard.value === "wild4" || topCard.value === "draw2"))
       : card.color === topCard.color || card.value === topCard.value || card.color === "wild"
 
     if (canPlayCard) {
@@ -795,12 +795,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
           // Improved stacking logic - match the exact card type
           const nextPlayerCanStack = nextPlayerHand.some((c) => {
-            // For Draw 2, can only stack with another Draw 2
             if (card.value === "draw2") {
               return c.value === "draw2"
-            }
-            // For Wild Draw 4, can stack with Wild Draw 4 or Draw 2
-            else if (card.value === "wild4") {
+            } else if (card.value === "wild4") {
               return c.value === "wild4" || c.value === "draw2"
             }
             return false
@@ -843,7 +840,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             }, 500)
           } else {
             // Next player can stack, continue with their turn
-            if (gameMode === "single") {
+            if (gameMode === "single" && nextPlayer !== playerName) {
               setTimeout(runComputerTurns, 1000)
             }
           }
@@ -947,7 +944,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           // Move to next player
           const allPlayers = getAllPlayers()
           const nextPlayerIndex = getNextPlayerIndex()
-          setCurrentPlayerIndex(nextPlayerIndex)
 
           // Check if next player can stack
           const nextPlayer = allPlayers[nextPlayerIndex].name
@@ -1099,7 +1095,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         sendGameAction("SPECIAL_CARD", { card })
         sendGameAction("TURN_CHANGE", { currentPlayerIndex: skipIndex })
 
-        if (isComputerTurn && gameMode === "single") {
+        if (isComputerTurn && gameMode === "single" && allPlayers[skipIndex].name !== playerName) {
           setTimeout(runComputerTurns, 1000)
         }
         break
@@ -1123,7 +1119,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         sendGameAction("DIRECTION_CHANGE", { direction: direction * -1 })
         sendGameAction("TURN_CHANGE", { currentPlayerIndex: newPlayerIndex })
 
-        if (isComputerTurn && gameMode === "single") {
+        if (isComputerTurn && gameMode === "single" && allPlayers[newPlayerIndex].name !== playerName) {
           setTimeout(runComputerTurns, 1000)
         }
         break
@@ -1141,7 +1137,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           sendGameAction("SPECIAL_CARD", { card })
           sendGameAction("TURN_CHANGE", { currentPlayerIndex: draw2Index })
 
-          if (isComputerTurn && gameMode === "single") {
+          if (isComputerTurn && gameMode === "single" && allPlayers[draw2Index].name !== playerName) {
             setTimeout(runComputerTurns, 1000)
           }
         }
@@ -1156,7 +1152,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         sendGameAction("SPECIAL_CARD", { card })
         sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
 
-        if (isComputerTurn && gameMode === "single") {
+        if (isComputerTurn && gameMode === "single" && allPlayers[nextPlayerIndex].name !== playerName) {
           setTimeout(runComputerTurns, 1000)
         }
         break
@@ -1175,7 +1171,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           sendGameAction("SPECIAL_CARD", { card })
           sendGameAction("TURN_CHANGE", { currentPlayerIndex: wild4Index })
 
-          if (isComputerTurn && gameMode === "single") {
+          if (isComputerTurn && gameMode === "single" && allPlayers[wild4Index].name !== playerName) {
             setTimeout(runComputerTurns, 1000)
           }
         }
@@ -1187,7 +1183,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         // Send turn change
         sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
 
-        if (isComputerTurn && gameMode === "single") {
+        if (isComputerTurn && gameMode === "single" && allPlayers[nextPlayerIndex].name !== playerName) {
           setTimeout(runComputerTurns, 1000)
         }
         break

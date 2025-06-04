@@ -2,8 +2,6 @@
 export function generateDeck() {
   const colors = ["red", "blue", "green", "yellow"]
   const numbers = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-  const actions = ["skip", "reverse", "draw2"]
-  const wilds = ["wild", "wild4"]
 
   const deck = []
 
@@ -18,19 +16,24 @@ export function generateDeck() {
       deck.push({ color, value: num })
     })
 
-    // Two of each action card per color
-    actions.forEach((action) => {
-      deck.push({ color, value: action })
-      deck.push({ color, value: action })
-    })
+    // Two of each action card per color (Skip, Reverse, Draw 2)
+    deck.push({ color, value: "skip" })
+    deck.push({ color, value: "skip" })
+    deck.push({ color, value: "reverse" })
+    deck.push({ color, value: "reverse" })
+    deck.push({ color, value: "draw2" })
+    deck.push({ color, value: "draw2" })
   })
 
-  // Add wild cards (4 of each)
-  wilds.forEach((wild) => {
-    for (let i = 0; i < 4; i++) {
-      deck.push({ color: "wild", value: wild })
-    }
-  })
+  // Add 4 Wild cards
+  for (let i = 0; i < 4; i++) {
+    deck.push({ color: "wild", value: "wild" })
+  }
+
+  // Add 4 Wild Draw 4 cards
+  for (let i = 0; i < 4; i++) {
+    deck.push({ color: "wild", value: "wild4" })
+  }
 
   return deck
 }
@@ -69,8 +72,7 @@ export function calculatePoints(cards) {
       points += 20
     } else if (card.value === "wild" || card.value === "wild4") {
       points += 50
-    } else if (card.value !== "back") {
-      // Don't count card backs
+    } else {
       points += Number.parseInt(card.value) || 0
     }
   })
@@ -78,20 +80,23 @@ export function calculatePoints(cards) {
   return points
 }
 
-// Get computer move based on difficulty with improved stacking logic
+// Get computer move based on difficulty
 export function getComputerMove(hand, topCard, canStack, difficulty = "medium") {
   // Find playable cards
-  let playableCards = []
+  const playableCards = hand.filter((card) => {
+    if (canStack) {
+      // For stacking, we need to match the exact card type
+      if (topCard.value === "draw2") {
+        return card.value === "draw2"
+      } else if (topCard.value === "wild4") {
+        return card.value === "wild4" || card.value === "draw2"
+      }
+      return false
+    }
 
-  if (canStack) {
-    // When stacking is active, only +2 and +4 cards can be played
-    playableCards = hand.filter((card) => card.value === "draw2" || card.value === "wild4")
-  } else {
     // Normal play rules
-    playableCards = hand.filter((card) => {
-      return card.color === topCard.color || card.value === topCard.value || card.color === "wild"
-    })
-  }
+    return card.color === topCard.color || card.value === topCard.value || card.color === "wild"
+  })
 
   if (playableCards.length === 0) {
     return { move: "draw" }
@@ -110,43 +115,31 @@ export function getComputerMove(hand, topCard, canStack, difficulty = "medium") 
 
     case "hard":
       // Strategic play - prioritize action cards and high-value cards
-      if (canStack) {
-        // When stacking, prefer +4 over +2
-        const wild4Cards = playableCards.filter((card) => card.value === "wild4")
-        const draw2Cards = playableCards.filter((card) => card.value === "draw2")
+      const actionCards = playableCards.filter((card) =>
+        ["skip", "reverse", "draw2", "wild", "wild4"].includes(card.value),
+      )
 
-        if (wild4Cards.length > 0) {
-          chosenCard = wild4Cards[0]
+      if (actionCards.length > 0) {
+        // Prioritize wild cards, then draw cards, then other actions
+        const wildCards = actionCards.filter((card) => card.value === "wild" || card.value === "wild4")
+        const drawCards = actionCards.filter((card) => card.value === "draw2")
+
+        if (wildCards.length > 0) {
+          chosenCard = wildCards[0]
+        } else if (drawCards.length > 0) {
+          chosenCard = drawCards[0]
         } else {
-          chosenCard = draw2Cards[0]
+          chosenCard = actionCards[0]
         }
       } else {
-        const actionCards = playableCards.filter((card) =>
-          ["skip", "reverse", "draw2", "wild", "wild4"].includes(card.value),
-        )
-
-        if (actionCards.length > 0) {
-          // Prioritize wild cards, then draw cards, then other actions
-          const wildCards = actionCards.filter((card) => card.value === "wild" || card.value === "wild4")
-          const drawCards = actionCards.filter((card) => card.value === "draw2")
-
-          if (wildCards.length > 0) {
-            chosenCard = wildCards[0]
-          } else if (drawCards.length > 0) {
-            chosenCard = drawCards[0]
-          } else {
-            chosenCard = actionCards[0]
-          }
+        // Play highest value number card
+        const numberCards = playableCards.filter((card) => !isNaN(Number.parseInt(card.value)))
+        if (numberCards.length > 0) {
+          chosenCard = numberCards.reduce((highest, current) =>
+            Number.parseInt(current.value) > Number.parseInt(highest.value) ? current : highest,
+          )
         } else {
-          // Play highest value number card
-          const numberCards = playableCards.filter((card) => !isNaN(Number.parseInt(card.value)))
-          if (numberCards.length > 0) {
-            chosenCard = numberCards.reduce((highest, current) =>
-              Number.parseInt(current.value) > Number.parseInt(highest.value) ? current : highest,
-            )
-          } else {
-            chosenCard = playableCards[0]
-          }
+          chosenCard = playableCards[0]
         }
       }
 
@@ -156,34 +149,20 @@ export function getComputerMove(hand, topCard, canStack, difficulty = "medium") 
     case "medium":
     default:
       // Balanced play - sometimes strategic, sometimes random
-      if (canStack) {
-        // When stacking, be more strategic
-        const wild4Cards = playableCards.filter((card) => card.value === "wild4")
-        const draw2Cards = playableCards.filter((card) => card.value === "draw2")
+      if (Math.random() > 0.5) {
+        // Strategic move
+        const actionCards = playableCards.filter((card) =>
+          ["skip", "reverse", "draw2", "wild", "wild4"].includes(card.value),
+        )
 
-        if (wild4Cards.length > 0 && Math.random() > 0.3) {
-          chosenCard = wild4Cards[0]
-        } else if (draw2Cards.length > 0) {
-          chosenCard = draw2Cards[0]
+        if (actionCards.length > 0 && Math.random() > 0.3) {
+          chosenCard = actionCards[Math.floor(Math.random() * actionCards.length)]
         } else {
-          chosenCard = playableCards[0]
-        }
-      } else {
-        if (Math.random() > 0.5) {
-          // Strategic move
-          const actionCards = playableCards.filter((card) =>
-            ["skip", "reverse", "draw2", "wild", "wild4"].includes(card.value),
-          )
-
-          if (actionCards.length > 0 && Math.random() > 0.3) {
-            chosenCard = actionCards[Math.floor(Math.random() * actionCards.length)]
-          } else {
-            chosenCard = playableCards[Math.floor(Math.random() * playableCards.length)]
-          }
-        } else {
-          // Random move
           chosenCard = playableCards[Math.floor(Math.random() * playableCards.length)]
         }
+      } else {
+        // Random move
+        chosenCard = playableCards[Math.floor(Math.random() * playableCards.length)]
       }
 
       cardIndex = hand.findIndex((card) => card === chosenCard)
@@ -205,7 +184,7 @@ export function getComputerMove(hand, topCard, canStack, difficulty = "medium") 
 
 // Get the most frequent color in a hand (for computer's wild card choice)
 function getMostFrequentColor(hand) {
-  const colors = hand.filter((card) => card.color !== "wild" && card.value !== "back").map((card) => card.color)
+  const colors = hand.filter((card) => card.color !== "wild").map((card) => card.color)
 
   if (colors.length === 0) {
     return ["red", "blue", "green", "yellow"][Math.floor(Math.random() * 4)]
