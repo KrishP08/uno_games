@@ -53,25 +53,24 @@ export function Lobby({
     const finalPointsToWin =
       customPoints && !isNaN(Number.parseInt(customPoints)) ? Number.parseInt(customPoints) : pointsToWin
 
-    // Call the onCreateRoom function with the room settings
-    onCreateRoom(roomName, maxPlayers, finalPointsToWin, {
+    // Create comprehensive game rules object
+    const gameRules = {
       stackingEnabled,
       unlimitedDrawEnabled,
       forcePlayEnabled,
       jumpInEnabled,
-    })
+      pointsToWin: finalPointsToWin,
+    }
+
+    // Call the onCreateRoom function with the room settings
+    onCreateRoom(roomName, maxPlayers, finalPointsToWin, gameRules)
 
     // Log for debugging
-    console.log("Creating room:", {
+    console.log("Creating room with rules:", {
       roomName,
       maxPlayers,
       pointsToWin: finalPointsToWin,
-      rules: {
-        stackingEnabled,
-        unlimitedDrawEnabled,
-        forcePlayEnabled,
-        jumpInEnabled,
-      },
+      rules: gameRules,
       playerName,
     })
   }
@@ -82,12 +81,16 @@ export function Lobby({
       const finalPointsToWin =
         customPoints && !isNaN(Number.parseInt(customPoints)) ? Number.parseInt(customPoints) : pointsToWin
 
-      onCreateRoom("Single Player Game", computerPlayers + 1, finalPointsToWin, {
+      // Create comprehensive game rules object for single player
+      const gameRules = {
         stackingEnabled,
         unlimitedDrawEnabled,
         forcePlayEnabled,
         jumpInEnabled,
-      })
+        pointsToWin: finalPointsToWin,
+      }
+
+      onCreateRoom("Single Player Game", computerPlayers + 1, finalPointsToWin, gameRules)
     }
   }
 

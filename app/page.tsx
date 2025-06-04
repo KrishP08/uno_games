@@ -146,7 +146,10 @@ export default function UnoGame() {
         name: roomName,
         maxPlayers,
         pointsToWin,
-        gameRules,
+        stackingEnabled: gameRules.stackingEnabled,
+        unlimitedDrawEnabled: gameRules.unlimitedDrawEnabled,
+        forcePlayEnabled: gameRules.forcePlayEnabled,
+        jumpInEnabled: gameRules.jumpInEnabled,
         playerId,
         playerName,
       })
@@ -164,7 +167,10 @@ export default function UnoGame() {
         host: playerId,
         settings: {
           pointsToWin,
-          ...gameRules,
+          stackingEnabled: gameRules.stackingEnabled,
+          unlimitedDrawEnabled: gameRules.unlimitedDrawEnabled,
+          forcePlayEnabled: gameRules.forcePlayEnabled,
+          jumpInEnabled: gameRules.jumpInEnabled,
         },
         isOffline: true,
       }

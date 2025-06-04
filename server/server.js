@@ -77,7 +77,17 @@ io.on("connection", (socket) => {
 
   // Handle creating a room
   socket.on("create-room", (data) => {
-    const { name, maxPlayers, pointsToWin, stackingEnabled, playerId, playerName } = data
+    const {
+      name,
+      maxPlayers,
+      pointsToWin,
+      stackingEnabled,
+      unlimitedDrawEnabled,
+      forcePlayEnabled,
+      jumpInEnabled,
+      playerId,
+      playerName,
+    } = data
 
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
     const roomCode = generateRoomCode()
@@ -96,8 +106,11 @@ io.on("connection", (socket) => {
       ],
       host: playerId,
       settings: {
-        pointsToWin,
-        stackingEnabled,
+        pointsToWin: pointsToWin || 500,
+        stackingEnabled: stackingEnabled || false,
+        unlimitedDrawEnabled: unlimitedDrawEnabled || false,
+        forcePlayEnabled: forcePlayEnabled || false,
+        jumpInEnabled: jumpInEnabled || false,
       },
       gameStarted: false,
       createdAt: Date.now(),
@@ -108,7 +121,7 @@ io.on("connection", (socket) => {
 
     socket.join(roomId)
 
-    console.log(`🏠 Room created: ${name} (${roomCode}) by ${playerName}`)
+    console.log(`🏠 Room created: ${name} (${roomCode}) by ${playerName} with rules:`, newRoom.settings)
 
     // Send room created confirmation
     socket.emit("room-created", newRoom)

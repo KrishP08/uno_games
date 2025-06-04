@@ -38,6 +38,33 @@ export function generateDeck() {
   return deck
 }
 
+// Add validation function to ensure cards are valid
+export function isValidCard(card) {
+  if (!card || !card.color || !card.value) return false
+
+  const validColors = ["red", "blue", "green", "yellow", "wild"]
+  const validValues = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "draw2", "wild", "wild4"]
+
+  // Check if color is valid
+  if (!validColors.includes(card.color)) return false
+
+  // Check if value is valid
+  if (!validValues.includes(card.value)) return false
+
+  // Wild cards can only have wild or wild4 values
+  if (card.color === "wild" && !["wild", "wild4"].includes(card.value)) return false
+
+  // Non-wild cards cannot have wild values
+  if (card.color !== "wild" && ["wild", "wild4"].includes(card.value)) return false
+
+  return true
+}
+
+// Filter out invalid cards from a hand
+export function validateHand(hand) {
+  return hand.filter((card) => isValidCard(card))
+}
+
 // Shuffle the deck using Fisher-Yates algorithm
 export function shuffleDeck(deck) {
   const newDeck = [...deck]
