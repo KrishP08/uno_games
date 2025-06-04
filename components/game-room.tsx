@@ -807,17 +807,17 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setDrawnThisTurn(0)
       setMustPlayDrawnCard(false)
 
+      // FIXED: Remove card from player's hand IMMEDIATELY to prevent race conditions
+      const newHand = [...playerHands[playerName]]
+      newHand.splice(cardIndex, 1)
+
+      setPlayerHands({
+        ...playerHands,
+        [playerName]: newHand,
+      })
+
       // For wild cards, show color selector
       if (card.color === "wild") {
-        // Remove card from player's hand
-        const newHand = [...playerHands[playerName]]
-        newHand.splice(cardIndex, 1)
-
-        setPlayerHands({
-          ...playerHands,
-          [playerName]: newHand,
-        })
-
         // Store the wild card for later processing
         setPendingWildCard(card)
         setShowColorSelector(true)
@@ -833,17 +833,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         return
       }
 
-      // Remove card from player's hand after animation delay
+      // Add card to discard pile after a short delay for animation
       setTimeout(() => {
-        const newHand = [...playerHands[playerName]]
-        newHand.splice(cardIndex, 1)
-
-        setPlayerHands({
-          ...playerHands,
-          [playerName]: newHand,
-        })
-
-        // Add card to discard pile
         setDiscardPile([...discardPile, card])
         setAnimatingCard(null)
 
@@ -988,16 +979,17 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       // Set animating card
       setAnimatingCard({ ...card, playerName: computerPlayer.name })
 
-      // Remove card from computer's hand after animation delay
+      // FIXED: Remove card from computer's hand IMMEDIATELY
+      const newHand = [...computerHand]
+      newHand.splice(cardIndex, 1)
+
+      setPlayerHands({
+        ...playerHands,
+        [computerPlayer.name]: newHand,
+      })
+
+      // Add card to discard pile after animation delay
       setTimeout(() => {
-        const newHand = [...computerHand]
-        newHand.splice(cardIndex, 1)
-
-        setPlayerHands({
-          ...playerHands,
-          [computerPlayer.name]: newHand,
-        })
-
         // Add card to discard pile
         const playedCard = card.color === "wild" ? { ...card, color: chosenColor } : card
         setDiscardPile([...discardPile, playedCard])
