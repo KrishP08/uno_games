@@ -152,10 +152,17 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
           case "PLAY_CARD":
             if (data.data && data.data.card) {
-              const { card, playerName: cardPlayerName } = data.data
+              const { card, playerName: cardPlayerName, playerHand, discardPile: updatedDiscardPile } = data.data
 
-              // Update player's hand
-              if (playerHands[data.playerName]) {
+              // Update player's hand with the complete hand if provided
+              if (playerHand && data.playerName) {
+                setPlayerHands((prev) => ({
+                  ...prev,
+                  [data.playerName]: playerHand,
+                }))
+              }
+              // Fallback to removing a card if complete hand not provided
+              else if (playerHands[data.playerName]) {
                 const updatedHand = [...playerHands[data.playerName]]
                 // Remove a card of the same type (we don't know exact index)
                 const cardIndex = updatedHand.findIndex((c) => c.color === card.color && c.value === card.value)
@@ -170,8 +177,13 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 }
               }
 
-              // Add card to discard pile
-              setDiscardPile((prev) => [...prev, card])
+              // Update discard pile with the complete pile if provided
+              if (updatedDiscardPile) {
+                setDiscardPile(updatedDiscardPile)
+              } else {
+                // Add card to discard pile
+                setDiscardPile((prev) => [...prev, card])
+              }
 
               // Set game message
               setGameMessage(`${data.playerName} played ${card.color} ${card.value}`)
@@ -411,6 +423,26 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setShowEndGameCards(true)
               setGameMessage(`${winner} wins the round!`)
               playWinSound()
+            }
+            break
+
+          case "REQUEST_SYNC":
+            if (data.data && data.data.requesterId && isHost()) {
+              console.log("🔄 Received sync request from player:", data.data.requesterId)
+
+              // Host responds with complete game state
+              const gameState = {
+                deck,
+                playerHands,
+                discardPile,
+                currentPlayerIndex,
+                direction,
+                playerSaidUno,
+                stackedCards,
+                canStack,
+              }
+
+              sendGameAction("GAME_STATE_SYNC", gameState)
             }
             break
         }
@@ -884,7 +916,85 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     }
   }
 
-  // Handle wild card color selection
+  // Add a new function to periodically sync game state in multiplayer mode:
+
+  // Add this function after the runComputerTurns function:
+
+  // Periodically sync game state in multiplayer mode
+  const syncGameState = () => {
+    if (socketClient && socketClient.isConnected() && gameMode === "multi" && gameStarted) {
+      // Only the host sends full game state to keep everyone in sync
+      if (isHost()) {
+        console.log("🔄 Host sending periodic game state sync")
+
+        // Prepare complete game state
+        const gameState = {
+          deck,
+          playerHands,
+          discardPile,
+          currentPlayerIndex,
+          direction,
+          playerSaidUno,
+          stackedCards,
+          canStack,
+        }
+
+        // Send complete game state to all players
+        sendGameAction("GAME_STATE_SYNC", gameState)
+      }
+    }
+  }
+
+  // Add this useEffect to set up periodic sync:
+
+  // Add this useEffect after the other useEffect hooks
+  useEffect(() => {
+    // Set up periodic sync for multiplayer games
+    let syncInterval
+
+    if (gameMode === "multi" && gameStarted) {
+      // Sync every 10 seconds to ensure all players have the same state
+      syncInterval = setInterval(syncGameState, 10000)
+    }
+
+    return () => {
+      if (syncInterval) {
+        clearInterval(syncInterval)
+      }
+    }
+  }, [gameMode, gameStarted, isHost, deck, playerHands, discardPile, currentPlayerIndex])
+
+  // Also enhance the requestGameStateSync function to be more robust:
+
+  // Replace the existing requestGameStateSync function with this:
+  const requestGameStateSync = () => {
+    if (socketClient && socketClient.isConnected() && gameMode === "multi") {
+      setSyncInProgress(true)
+      setGameMessage("Requesting game state sync...")
+
+      try {
+        socketClient.gameAction({
+          roomId: currentRoom.id,
+          action: "REQUEST_SYNC",
+          gameData: { requesterId: playerId },
+        })
+
+        // Set a timeout to reset sync status if no response
+        setTimeout(() => {
+          setSyncInProgress(false)
+          setGameMessage("Game state sync complete or timed out")
+        }, 5000)
+      } catch (error) {
+        console.error("Failed to send game action:", error)
+        setSyncInProgress(false)
+      }
+    }
+  }
+
+  // Add a handler for REQUEST_SYNC in the handleGameUpdate function:
+
+  // Add this case in the switch statement in handleGameUpdate:
+  // Add this case in the switch statement in handleGameUpdate:
   const handleColorSelect = (color) => {
     if (!pendingWildCard) return
 
@@ -1148,8 +1258,15 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         }
       }, 500)
 
-      // Send card played action
-      sendGameAction("PLAY_CARD", { card: playedCardRef, cardIndex, playerName })
+      // Send card played action with complete information
+      sendGameAction("PLAY_CARD", {
+        card: playedCardRef,
+        cardIndex,
+        playerName,
+        playerHand: newHand, // Send updated hand
+        discardPile: [...discardPile, playedCardRef], // Send updated discard pile
+        currentPlayerIndex: currentPlayerIndex, // Send current player index
+      })
     } else {
       setGameMessage("Invalid move! The card must match in color or value.")
     }
@@ -1319,21 +1436,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setSoundEnabled(!soundEnabled)
   }
 
-  // Request full game state sync from other players
-  const requestGameStateSync = () => {
-    if (socketClient && socketClient.isConnected() && gameMode === "multi") {
-      try {
-        socketClient.gameAction({
-          roomId: currentRoom.id,
-          action: "REQUEST_SYNC",
-          gameData: { requesterId: playerId },
-        })
-      } catch (error) {
-        console.error("Failed to send game action:", error)
-      }
-    }
-  }
-
   // Get the top card safely
   const getTopCard = () => {
     if (discardPile.length > 0) {
@@ -1348,6 +1450,70 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setShowEndGameCards(false)
     setRoundWinner(null)
     startGame()
+  }
+
+  const syncGameState = () => {
+    if (socketClient && socketClient.isConnected() && gameMode === "multi" && gameStarted) {
+      // Only the host sends full game state to keep everyone in sync
+      if (isHost()) {
+        console.log("🔄 Host sending periodic game state sync")
+
+        // Prepare complete game state
+        const gameState = {
+          deck,
+          playerHands,
+          discardPile,
+          currentPlayerIndex,
+          direction,
+          playerSaidUno,
+          stackedCards,
+          canStack,
+        }
+
+        // Send complete game state to all players
+        sendGameAction("GAME_STATE_SYNC", gameState)
+      }
+    }
+  }
+
+  useEffect(() => {
+    // Set up periodic sync for multiplayer games
+    let syncInterval
+
+    if (gameMode === "multi" && gameStarted) {
+      // Sync every 10 seconds to ensure all players have the same state
+      syncInterval = setInterval(syncGameState, 10000)
+    }
+
+    return () => {
+      if (syncInterval) {
+        clearInterval(syncInterval)
+      }
+    }
+  }, [gameMode, gameStarted, isHost, deck, playerHands, discardPile, currentPlayerIndex])
+
+  const requestGameStateSync = () => {
+    if (socketClient && socketClient.isConnected() && gameMode === "multi") {
+      setSyncInProgress(true)
+      setGameMessage("Requesting game state sync...")
+
+      try {
+        socketClient.gameAction({
+          roomId: currentRoom.id,
+          action: "REQUEST_SYNC",
+          gameData: { requesterId: playerId },
+        })
+
+        // Set a timeout to reset sync status if no response
+        setTimeout(() => {
+          setSyncInProgress(false)
+          setGameMessage("Game state sync complete or timed out")
+        }, 5000)
+      } catch (error) {
+        console.error("Failed to send game action:", error)
+        setSyncInProgress(false)
+      }
+    }
   }
 
   if (!currentRoom) {
@@ -1640,17 +1806,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               <li>Reverse cards change the direction of play</li>
             </ul>
           </div>
-
-          {/* Voice control instructions */}
-          {voiceEnabled && (
-            <div className="mt-6 p-4 bg-white/5 rounded-lg">
-              <h3 className="text-lg font-medium text-white mb-2">Voice Commands</h3>
-              <ul className="list-disc list-inside text-white/80">
-                <li>Say "UNO" when you have one card left</li>
-                <li>Say "Draw" or "Pick" to draw a card</li>
-              </ul>
-            </div>
-          )}
         </>
       )}
     </div>

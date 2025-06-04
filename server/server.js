@@ -237,8 +237,9 @@ io.on("connection", (socket) => {
       room.gameState = gameData
     }
 
-    // Broadcast game action to all players in room except sender
-    socket.to(roomId).emit("game-update", {
+    // Broadcast game action to ALL players in room INCLUDING sender
+    // This ensures consistent state across all clients
+    io.to(roomId).emit("game-update", {
       action,
       data: gameData,
       playerId: playerSockets[socket.id]?.playerId,

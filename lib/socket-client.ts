@@ -8,6 +8,7 @@ export class SocketClient {
   private maxReconnectAttempts = 5
   private reconnectDelay = 2000
   private gameStateCache: any = null
+  private _lastAction: any = null
 
   constructor(url: string) {
     this.url = url
@@ -175,10 +176,27 @@ export class SocketClient {
   // Send game action with retry logic
   gameAction(actionData: any) {
     if (this.isConnected()) {
-      this.emit("game-action", actionData)
+      try {
+        this.emit("game-action", actionData)
+
+        // Store the last action for potential retry
+        this._lastAction = actionData
+
+        // Set a timeout to verify the action was processed
+        setTimeout(() => {
+          // If we're still connected but didn't get confirmation, retry once
+          if (this.isConnected() && this._lastAction === actionData) {
+            console.log("⚠️ No confirmation for game action, retrying once:", actionData.action)
+            this.emit("game-action", actionData)
+            this._lastAction = null
+          }
+        }, 2000)
+      } catch (error) {
+        console.error("❌ Error sending game action:", error)
+        this.queueAction(actionData)
+      }
     } else {
       console.warn("⚠️ Cannot send game action - not connected")
-      // Queue the action for when reconnected
       this.queueAction(actionData)
     }
   }
