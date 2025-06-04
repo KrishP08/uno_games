@@ -26,7 +26,11 @@ export function Lobby({
   const [roomName, setRoomName] = useState("")
   const [maxPlayers, setMaxPlayers] = useState(4)
   const [pointsToWin, setPointsToWin] = useState(500)
+  const [customPoints, setCustomPoints] = useState("500")
   const [stackingEnabled, setStackingEnabled] = useState(true)
+  const [unlimitedDrawEnabled, setUnlimitedDrawEnabled] = useState(true)
+  const [forcePlayEnabled, setForcePlayEnabled] = useState(true)
+  const [jumpInEnabled, setJumpInEnabled] = useState(false)
   const [activeTab, setActiveTab] = useState("instant")
   const [computerPlayers, setComputerPlayers] = useState(3)
   const [nameInput, setNameInput] = useState("")
@@ -45,22 +49,45 @@ export function Lobby({
       return
     }
 
+    // Use custom points if provided
+    const finalPointsToWin =
+      customPoints && !isNaN(Number.parseInt(customPoints)) ? Number.parseInt(customPoints) : pointsToWin
+
     // Call the onCreateRoom function with the room settings
-    onCreateRoom(roomName, maxPlayers, pointsToWin, stackingEnabled)
+    onCreateRoom(roomName, maxPlayers, finalPointsToWin, {
+      stackingEnabled,
+      unlimitedDrawEnabled,
+      forcePlayEnabled,
+      jumpInEnabled,
+    })
 
     // Log for debugging
     console.log("Creating room:", {
       roomName,
       maxPlayers,
-      pointsToWin,
-      stackingEnabled,
+      pointsToWin: finalPointsToWin,
+      rules: {
+        stackingEnabled,
+        unlimitedDrawEnabled,
+        forcePlayEnabled,
+        jumpInEnabled,
+      },
       playerName,
     })
   }
 
   const handleStartSinglePlayer = () => {
     if (playerName) {
-      onCreateRoom("Single Player Game", computerPlayers + 1, pointsToWin, stackingEnabled)
+      // Use custom points if provided
+      const finalPointsToWin =
+        customPoints && !isNaN(Number.parseInt(customPoints)) ? Number.parseInt(customPoints) : pointsToWin
+
+      onCreateRoom("Single Player Game", computerPlayers + 1, finalPointsToWin, {
+        stackingEnabled,
+        unlimitedDrawEnabled,
+        forcePlayEnabled,
+        jumpInEnabled,
+      })
     }
   }
 
@@ -154,26 +181,66 @@ export function Lobby({
                 </div>
 
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="pointsToWin">Points to Win</Label>
-                  <Select
-                    value={pointsToWin.toString()}
-                    onValueChange={(value) => setPointsToWin(Number.parseInt(value))}
-                  >
-                    <SelectTrigger id="pointsToWin">
-                      <SelectValue placeholder="Select points to win" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="100">100 Points</SelectItem>
-                      <SelectItem value="200">200 Points</SelectItem>
-                      <SelectItem value="300">300 Points</SelectItem>
-                      <SelectItem value="500">500 Points</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="customPoints">Points to Win</Label>
+                  <Input
+                    id="customPoints"
+                    type="number"
+                    placeholder="Enter points to win (e.g. 500)"
+                    value={customPoints}
+                    onChange={(e) => setCustomPoints(e.target.value)}
+                    min="50"
+                    max="5000"
+                  />
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="stacking">Enable Card Stacking</Label>
-                  <Switch id="stacking" checked={stackingEnabled} onCheckedChange={setStackingEnabled} />
+                <div className="pt-4 border-t">
+                  <h3 className="font-medium mb-3">Game Rules</h3>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="stacking" className="font-medium">
+                          Card Stacking
+                        </Label>
+                        <p className="text-sm text-muted-foreground">Allow stacking +2 and +4 cards</p>
+                      </div>
+                      <Switch id="stacking" checked={stackingEnabled} onCheckedChange={setStackingEnabled} />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="unlimitedDraw" className="font-medium">
+                          Unlimited Draw
+                        </Label>
+                        <p className="text-sm text-muted-foreground">Draw until you get a playable card</p>
+                      </div>
+                      <Switch
+                        id="unlimitedDraw"
+                        checked={unlimitedDrawEnabled}
+                        onCheckedChange={setUnlimitedDrawEnabled}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="forcePlay" className="font-medium">
+                          Force Play
+                        </Label>
+                        <p className="text-sm text-muted-foreground">Must play a card if you can</p>
+                      </div>
+                      <Switch id="forcePlay" checked={forcePlayEnabled} onCheckedChange={setForcePlayEnabled} />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="jumpIn" className="font-medium">
+                          Jump-In
+                        </Label>
+                        <p className="text-sm text-muted-foreground">Play identical cards out of turn</p>
+                      </div>
+                      <Switch id="jumpIn" checked={jumpInEnabled} onCheckedChange={setJumpInEnabled} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -355,25 +422,70 @@ export function Lobby({
                       </Select>
                     </div>
                     <div className="flex flex-col space-y-1.5">
-                      <Label htmlFor="pointsToWin">Points to Win</Label>
-                      <Select
-                        value={pointsToWin.toString()}
-                        onValueChange={(value) => setPointsToWin(Number.parseInt(value))}
-                      >
-                        <SelectTrigger id="pointsToWin">
-                          <SelectValue placeholder="Select points to win" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="100">100 Points</SelectItem>
-                          <SelectItem value="200">200 Points</SelectItem>
-                          <SelectItem value="300">300 Points</SelectItem>
-                          <SelectItem value="500">500 Points</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label htmlFor="customPointsMulti">Points to Win</Label>
+                      <Input
+                        id="customPointsMulti"
+                        type="number"
+                        placeholder="Enter points to win (e.g. 500)"
+                        value={customPoints}
+                        onChange={(e) => setCustomPoints(e.target.value)}
+                        min="50"
+                        max="5000"
+                      />
                     </div>
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="stacking">Enable Card Stacking</Label>
-                      <Switch id="stacking" checked={stackingEnabled} onCheckedChange={setStackingEnabled} />
+
+                    <div className="pt-4 border-t">
+                      <h3 className="font-medium mb-3">Game Rules</h3>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label htmlFor="stackingMulti" className="font-medium">
+                              Card Stacking
+                            </Label>
+                            <p className="text-sm text-muted-foreground">Allow stacking +2 and +4 cards</p>
+                          </div>
+                          <Switch id="stackingMulti" checked={stackingEnabled} onCheckedChange={setStackingEnabled} />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label htmlFor="unlimitedDrawMulti" className="font-medium">
+                              Unlimited Draw
+                            </Label>
+                            <p className="text-sm text-muted-foreground">Draw until you get a playable card</p>
+                          </div>
+                          <Switch
+                            id="unlimitedDrawMulti"
+                            checked={unlimitedDrawEnabled}
+                            onCheckedChange={setUnlimitedDrawEnabled}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label htmlFor="forcePlayMulti" className="font-medium">
+                              Force Play
+                            </Label>
+                            <p className="text-sm text-muted-foreground">Must play a card if you can</p>
+                          </div>
+                          <Switch
+                            id="forcePlayMulti"
+                            checked={forcePlayEnabled}
+                            onCheckedChange={setForcePlayEnabled}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label htmlFor="jumpInMulti" className="font-medium">
+                              Jump-In
+                            </Label>
+                            <p className="text-sm text-muted-foreground">Play identical cards out of turn</p>
+                          </div>
+                          <Switch id="jumpInMulti" checked={jumpInEnabled} onCheckedChange={setJumpInEnabled} />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

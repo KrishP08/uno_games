@@ -18,30 +18,51 @@ export function CircularGameLayout({
   drawAnimation,
   stackedCards,
 }) {
-  // Get player positions in circle
-  const getPlayerPosition = (index, total) => {
-    const angle = (index * 360) / total - 90 // Start from top
-    const radius = 200
-    const x = Math.cos((angle * Math.PI) / 180) * radius
-    const y = Math.sin((angle * Math.PI) / 180) * radius
-    return { x, y, angle }
+  // Reorder players so the current user is always at the bottom
+  const reorderPlayers = () => {
+    const playerIndex = players.findIndex((p) => p.name === playerName)
+    if (playerIndex === -1) return players
+
+    const result = [...players]
+    const currentPlayerObj = result.splice(playerIndex, 1)[0]
+    result.unshift(currentPlayerObj)
+    return result
   }
 
-  // Find current player's index (human player should be at bottom)
-  const humanPlayerIndex = players.findIndex((p) => p.name === playerName)
-  const reorderedPlayers = [...players]
+  const orderedPlayers = reorderPlayers()
 
-  // Reorder so human player is at bottom (index 0 in our circle)
-  if (humanPlayerIndex !== -1) {
-    const humanPlayer = reorderedPlayers.splice(humanPlayerIndex, 1)[0]
-    reorderedPlayers.unshift(humanPlayer)
+  // Calculate positions based on number of players
+  const getPlayerPositions = () => {
+    const positions = []
+    const totalPlayers = orderedPlayers.length
+
+    // Current player is always at bottom
+    positions.push({ x: 0, y: 250, angle: 0 })
+
+    if (totalPlayers === 2) {
+      // 2 players: opponent at top
+      positions.push({ x: 0, y: -250, angle: 180 })
+    } else if (totalPlayers === 3) {
+      // 3 players: opponents at top-left and top-right
+      positions.push({ x: -220, y: -150, angle: 135 })
+      positions.push({ x: 220, y: -150, angle: 225 })
+    } else if (totalPlayers === 4) {
+      // 4 players: opponents at left, top, and right
+      positions.push({ x: -250, y: 0, angle: 90 })
+      positions.push({ x: 0, y: -250, angle: 180 })
+      positions.push({ x: 250, y: 0, angle: 270 })
+    }
+
+    return positions
   }
+
+  const positions = getPlayerPositions()
 
   return (
     <div className="relative w-full h-[600px] flex items-center justify-center">
-      {/* Players positioned in circle */}
-      {reorderedPlayers.map((player, index) => {
-        const position = getPlayerPosition(index, reorderedPlayers.length)
+      {/* Players positioned around the table */}
+      {orderedPlayers.map((player, index) => {
+        const position = positions[index]
         const isCurrentPlayer = currentPlayer === player.name
         const isHumanPlayer = player.name === playerName
         const hand = playerHands[player.name] || []
@@ -77,9 +98,15 @@ export function CircularGameLayout({
               )}
             </div>
 
-            {/* Player cards */}
+            {/* Player cards - only show for non-human players */}
             {!isHumanPlayer && (
-              <div className="flex flex-wrap justify-center max-w-[150px]">
+              <div
+                className="flex flex-wrap justify-center max-w-[150px]"
+                style={{
+                  transform: `rotate(${position.angle}deg)`,
+                  transformOrigin: "center center",
+                }}
+              >
                 {hand.map((card, cardIndex) => (
                   <div
                     key={cardIndex}

@@ -121,7 +121,13 @@ export default function UnoGame() {
           { id: "ai-player-2", name: "Sam (AI)", isAI: true },
         ],
         host: "ai-player-1",
-        settings: { pointsToWin: 500, stackingEnabled: true },
+        settings: {
+          pointsToWin: 500,
+          stackingEnabled: true,
+          unlimitedDrawEnabled: true,
+          forcePlayEnabled: true,
+          jumpInEnabled: false,
+        },
         isOffline: true,
       },
     ])
@@ -133,14 +139,14 @@ export default function UnoGame() {
     setStatusMessage("")
   }
 
-  const createRoom = (roomName, maxPlayers, pointsToWin, stackingEnabled) => {
+  const createRoom = (roomName, maxPlayers, pointsToWin, gameRules) => {
     if (socketClient.current && socketClient.current.isConnected()) {
       console.log("🏠 Creating room via Socket.IO")
       socketClient.current.createRoom({
         name: roomName,
         maxPlayers,
         pointsToWin,
-        stackingEnabled,
+        gameRules,
         playerId,
         playerName,
       })
@@ -156,7 +162,10 @@ export default function UnoGame() {
         maxPlayers,
         players: [{ id: playerId, name: playerName }],
         host: playerId,
-        settings: { pointsToWin, stackingEnabled },
+        settings: {
+          pointsToWin,
+          ...gameRules,
+        },
         isOffline: true,
       }
 
@@ -267,7 +276,13 @@ export default function UnoGame() {
       maxPlayers: 4,
       players: [{ id: playerId, name: playerName }, ...aiPlayers.slice(0, 2)],
       host: playerId,
-      settings: { pointsToWin: 500, stackingEnabled: true },
+      settings: {
+        pointsToWin: 500,
+        stackingEnabled: true,
+        unlimitedDrawEnabled: true,
+        forcePlayEnabled: true,
+        jumpInEnabled: false,
+      },
       isInstant: true,
     }
 
