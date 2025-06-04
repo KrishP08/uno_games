@@ -294,6 +294,7 @@ export function Lobby({
                               👥 Players: {room.players.length}/{room.maxPlayers} • 🎯 Points:{" "}
                               {room.settings?.pointsToWin || 500}
                               {room.settings?.stackingEnabled && " • 📚 Stacking"}
+                              {room.gameStarted && " • 🎮 In Progress"}
                             </p>
                             {room.players.length > 0 && (
                               <p className="text-xs text-blue-600 mt-1">
@@ -303,10 +304,14 @@ export function Lobby({
                           </div>
                           <Button
                             onClick={() => onJoinRoom(room.id)}
-                            disabled={room.players.length >= room.maxPlayers}
+                            disabled={room.players.length >= room.maxPlayers || room.gameStarted}
                             className="bg-green-600 hover:bg-green-700 text-white font-bold px-6"
                           >
-                            {room.players.length >= room.maxPlayers ? "Full" : "Join"}
+                            {room.gameStarted
+                              ? "In Progress"
+                              : room.players.length >= room.maxPlayers
+                                ? "Full"
+                                : "Join"}
                           </Button>
                         </div>
                       ))}

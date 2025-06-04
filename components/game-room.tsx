@@ -61,6 +61,16 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         console.log("👋 Player left:", data)
         setCurrentRoom(data.room)
         setGameMessage(`${data.player.name} left the room`)
+
+        // If game is active and player left, remove their hand and check for single player
+        if (gameStarted && playerHands[data.player.name]) {
+          const newPlayerHands = { ...playerHands }
+          delete newPlayerHands[data.player.name]
+          setPlayerHands(newPlayerHands)
+
+          // Check if only one player remains
+          setTimeout(checkForSinglePlayerRemaining, 1000)
+        }
       }
 
       const handleGameStarted = (data) => {
@@ -88,11 +98,17 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         }
       }
 
+      const handleStartGameError = (error) => {
+        console.log("❌ Start game error:", error)
+        setGameMessage(`Error: ${error.message}`)
+      }
+
       // Add listeners
       socketClient.on("player-joined", handlePlayerJoined)
       socketClient.on("player-left", handlePlayerLeft)
       socketClient.on("game-started", handleGameStarted)
       socketClient.on("game-update", handleGameUpdate)
+      socketClient.on("start-game-error", handleStartGameError)
 
       // Cleanup listeners on unmount
       return () => {
@@ -100,6 +116,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         socketClient.off("player-left", handlePlayerLeft)
         socketClient.off("game-started", handleGameStarted)
         socketClient.off("game-update", handleGameUpdate)
+        socketClient.off("start-game-error", handleStartGameError) // Add this line
       }
     }
   }, [socketClient, gameMode])
@@ -222,11 +239,19 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   const canStartGame = () => {
     if (gameMode === "single") return true
     if (!currentRoom) return false
-    return currentRoom.players.length >= 2 && currentRoom.players.length <= currentRoom.maxPlayers
+
+    // For multiplayer, need at least 2 players and room shouldn't be full unless it's exactly at max
+    const playerCount = currentRoom.players.length
+    return playerCount >= 2 && playerCount <= currentRoom.maxPlayers
   }
 
   // Start a new game
   const startGame = () => {
+    if (gameStarted) {
+      console.log("⚠️ Game already started, ignoring start request")
+      return
+    }
+
     console.log("🎮 Starting game...")
 
     const newDeck = generateDeck()
@@ -625,6 +650,30 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     sendGameAction("ROUND_WIN", { winner, newScores })
   }
 
+  // Add this function after the handleRoundWin function
+  const checkForSinglePlayerRemaining = () => {
+    const allPlayers = getAllPlayers()
+    const activePlayers = allPlayers.filter((player) => {
+      const hand = playerHands[player.name] || []
+      return hand.length > 0 || player.name === playerName
+    })
+
+    if (activePlayers.length === 1 && gameStarted) {
+      const winner = activePlayers[0].name
+      setGameWinner(winner)
+      setGameMessage(`${winner} wins! All other players have left the game.`)
+      playWinSound()
+
+      // End the game and return to room after 3 seconds
+      setTimeout(() => {
+        setGameStarted(false)
+        setGameWinner(null)
+        setRoundWinner(null)
+        setGameMessage("Game ended. Returning to room...")
+      }, 3000)
+    }
+  }
+
   // Start a new round
   const startNewRound = () => {
     setShowEndGameCards(false)
@@ -940,10 +989,14 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           </div>
 
           {/* Game start button */}
-          {isHost() && canStartGame() && (
-            <Button onClick={startGame} className="w-full bg-green-600 hover:bg-green-700 text-white text-lg py-3 mb-4">
+          {isHost() && canStartGame() && !gameStarted && (
+            <Button
+              onClick={startGame}
+              className="w-full bg-green-600 hover:bg-green-700 text-white text-lg py-3 mb-4"
+              disabled={gameStarted}
+            >
               <Play className="mr-2 h-5 w-5" />
-              Start Game
+              Start Game ({currentRoom.players.length} players)
             </Button>
           )}
 

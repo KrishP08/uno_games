@@ -6,20 +6,35 @@ const cors = require("cors")
 const app = express()
 const server = http.createServer(app)
 
-// Configure CORS for Socket.IO
+// Configure CORS for production
 const io = new Server(server, {
   cors: {
-    origin: "*", // In production, specify your domain
+    origin: process.env.CLIENT_URL || "*", // Will be set in Render
     methods: ["GET", "POST"],
+    credentials: false,
   },
 })
 
 app.use(cors())
 app.use(express.json())
 
+// Health check endpoint (important for Render)
+app.get("/", (req, res) => {
+  res.json({
+    status: "UNO Game Server is running!",
+    timestamp: new Date().toISOString(),
+    activeRooms: Object.keys(gameRooms).length,
+  })
+})
+
+// Health check for Render
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "healthy" })
+})
+
 // Store game rooms and players
 const gameRooms = {}
-const playerSockets = {} // Map socket.id to player info
+const playerSockets = {}
 
 // Helper function to generate room codes
 function generateRoomCode() {
@@ -223,14 +238,45 @@ io.on("connection", (socket) => {
     const { roomId } = data
     const room = gameRooms[roomId]
 
-    if (!room) return
+    if (!room) {
+      socket.emit("start-game-error", { message: "Room not found" })
+      return
+    }
+
+    // Check if game is already started
+    if (room.gameStarted) {
+      socket.emit("start-game-error", { message: "Game already started" })
+      return
+    }
+
+    // Check if player is the host
+    const playerInfo = playerSockets[socket.id]
+    if (!playerInfo || room.host !== playerInfo.playerId) {
+      socket.emit("start-game-error", { message: "Only the host can start the game" })
+      return
+    }
+
+    // Check if we have enough players
+    if (room.players.length < 2) {
+      socket.emit("start-game-error", { message: "Need at least 2 players to start" })
+      return
+    }
+
+    // Check if room is properly filled (for 4-player rooms, we can start with 2-4 players)
+    if (room.players.length > room.maxPlayers) {
+      socket.emit("start-game-error", { message: "Too many players in room" })
+      return
+    }
 
     room.gameStarted = true
 
-    console.log(`🎮 Game started in room: ${room.name}`)
+    console.log(`🎮 Game started in room: ${room.name} with ${room.players.length} players`)
 
     // Notify all players in room
-    io.to(roomId).emit("game-started", { room })
+    io.to(roomId).emit("game-started", {
+      room,
+      gameState: data.gameState,
+    })
 
     // Broadcast updated room list
     io.emit("room-list", Object.values(gameRooms))
@@ -306,8 +352,10 @@ setInterval(
   30 * 60 * 1000,
 )
 
+// Use PORT from environment (Render provides this)
 const PORT = process.env.PORT || 3001
 server.listen(PORT, () => {
   console.log(`🚀 UNO Game Server running on port ${PORT}`)
-  console.log(`📡 WebSocket server ready for connections`)
+  console.log(`���� WebSocket server ready for connections`)
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`)
 })

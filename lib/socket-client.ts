@@ -73,6 +73,7 @@ export class SocketClient {
       "player-left",
       "game-update",
       "game-started",
+      "start-game-error",
     ]
 
     events.forEach((event) => {
