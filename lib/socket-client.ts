@@ -4,6 +4,10 @@ export class SocketClient {
   private socket: Socket | null = null
   private url: string
   private listeners: Map<string, Function[]> = new Map()
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 5
+  private reconnectDelay = 2000
+  private gameStateCache: any = null
 
   constructor(url: string) {
     this.url = url
@@ -27,6 +31,7 @@ export class SocketClient {
         this.socket.on("connect", () => {
           console.log("✅ Connected to UNO game server")
           console.log("🆔 Socket ID:", this.socket?.id)
+          this.reconnectAttempts = 0
           resolve()
         })
 
@@ -79,6 +84,12 @@ export class SocketClient {
     events.forEach((event) => {
       this.socket!.on(event, (data) => {
         console.log(`📨 Received ${event}:`, data)
+
+        // Cache game state updates for reconnection
+        if (event === "game-update" && data.action === "GAME_STATE_SYNC") {
+          this.gameStateCache = data.data
+        }
+
         this.handleMessage(event, data)
       })
     })
@@ -119,6 +130,11 @@ export class SocketClient {
       this.socket.emit(event, data)
     } else {
       console.warn("⚠️ Socket not connected, cannot emit:", event)
+
+      // Try to reconnect if not connected
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.reconnect()
+      }
     }
   }
 
@@ -156,13 +172,70 @@ export class SocketClient {
     this.emit("leave-room", leaveData)
   }
 
-  // Send game action
+  // Send game action with retry logic
   gameAction(actionData: any) {
-    this.emit("game-action", actionData)
+    if (this.isConnected()) {
+      this.emit("game-action", actionData)
+    } else {
+      console.warn("⚠️ Cannot send game action - not connected")
+      // Queue the action for when reconnected
+      this.queueAction(actionData)
+    }
   }
 
   // Start game
   startGame(gameData: any) {
     this.emit("start-game", gameData)
+  }
+
+  // Queue actions for when reconnected
+  private actionQueue: any[] = []
+
+  private queueAction(actionData: any) {
+    this.actionQueue.push(actionData)
+    console.log("📋 Queued action for when reconnected:", actionData.action)
+  }
+
+  private processQueuedActions() {
+    if (this.actionQueue.length > 0) {
+      console.log("📤 Processing queued actions:", this.actionQueue.length)
+      this.actionQueue.forEach((action) => {
+        this.gameAction(action)
+      })
+      this.actionQueue = []
+    }
+  }
+
+  // Manual reconnect
+  private reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log("❌ Max reconnection attempts reached")
+      return
+    }
+
+    this.reconnectAttempts++
+    console.log(`🔄 Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`)
+
+    setTimeout(() => {
+      this.connect()
+        .then(() => {
+          console.log("✅ Reconnected successfully")
+          this.processQueuedActions()
+        })
+        .catch((error) => {
+          console.error("❌ Reconnection failed:", error)
+          this.reconnect()
+        })
+    }, this.reconnectDelay * this.reconnectAttempts)
+  }
+
+  // Get cached game state
+  getCachedGameState() {
+    return this.gameStateCache
+  }
+
+  // Clear cached game state
+  clearCachedGameState() {
+    this.gameStateCache = null
   }
 }
