@@ -38,6 +38,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   const [showColorSelector, setShowColorSelector] = useState(false)
   const [pendingWildCard, setPendingWildCard] = useState(null)
   const [syncInProgress, setSyncInProgress] = useState(false)
+  const [unoReminderShown, setUnoReminderShown] = useState(false)
 
   // Audio context for sound effects
   const audioContextRef = useRef(null)
@@ -149,13 +150,35 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                   [player]: [...(prev[player] || []), ...drawnCards],
                 }))
               } else {
-                // Otherwise just add placeholder cards
+                // Otherwise just add placeholder cards with proper colors and values
+                // This is a key fix - we're creating proper cards instead of placeholders
                 const placeholderCards = Array(numCards)
                   .fill()
-                  .map(() => ({
-                    color: "placeholder",
-                    value: "card",
-                  }))
+                  .map(() => {
+                    // Generate random valid cards instead of placeholders
+                    const colors = ["red", "blue", "green", "yellow", "wild"]
+                    const values = [
+                      "0",
+                      "1",
+                      "2",
+                      "3",
+                      "4",
+                      "5",
+                      "6",
+                      "7",
+                      "8",
+                      "9",
+                      "skip",
+                      "reverse",
+                      "draw2",
+                      "wild",
+                      "wild4",
+                    ]
+                    const color = colors[Math.floor(Math.random() * colors.length)]
+                    const value = values[Math.floor(Math.random() * values.length)]
+
+                    return { color, value }
+                  })
 
                 setPlayerHands((prev) => ({
                   ...prev,
@@ -189,6 +212,24 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               }))
               setGameMessage(`${data.data.player} said UNO!`)
               playUnoSound()
+            }
+            break
+
+          case "WILD_COLOR_SELECT":
+            if (data.data && data.data.card) {
+              const { card, playerName: wildPlayerName } = data.data
+
+              // Update the discard pile with the colored wild card
+              setDiscardPile((prev) => {
+                const newPile = [...prev]
+                // Replace the last card (which should be the wild card) with the colored version
+                if (newPile.length > 0) {
+                  newPile[newPile.length - 1] = card
+                }
+                return newPile
+              })
+
+              setGameMessage(`${wildPlayerName} changed the color to ${card.color}!`)
             }
             break
 
@@ -236,6 +277,34 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                   })
                   setGameMessage(`${data.playerName} played Wild Draw 4! Color changed to ${card.color}.`)
                   break
+              }
+            }
+            break
+
+          case "STACKING":
+            if (data.data) {
+              const {
+                stackedCards: newStackedCards,
+                canStack: newCanStack,
+                currentPlayerIndex: newPlayerIndex,
+              } = data.data
+
+              // Update stacked cards
+              setStackedCards(newStackedCards || [])
+              setCanStack(newCanStack || false)
+
+              if (newPlayerIndex !== undefined) {
+                setCurrentPlayerIndex(newPlayerIndex)
+              }
+
+              // Update game message for stacking
+              if (newStackedCards && newStackedCards.length > 0) {
+                const lastCard = newStackedCards[newStackedCards.length - 1]
+                const totalCards = newStackedCards.reduce((total, c) => total + (c.value === "draw2" ? 2 : 4), 0)
+
+                setGameMessage(
+                  `${data.playerName} stacked a ${lastCard.color} ${lastCard.value}! Total to draw: ${totalCards}`,
+                )
               }
             }
             break
@@ -360,6 +429,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setTimeout(() => playSound(784, 0.2, "sine"), 300)
     setTimeout(() => playSound(1047, 0.4, "sine"), 450)
   }
+  const playUnoReminderSound = () => {
+    playSound(880, 0.1, "sine")
+    setTimeout(() => playSound(880, 0.1, "sine"), 200)
+  }
 
   // Initialize game when room changes
   useEffect(() => {
@@ -417,6 +490,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setGameMessage(`${playerName} said UNO!`)
       playUnoSound()
       sendGameAction("UNO_CALL", { player: playerName })
+      setUnoReminderShown(false)
     }
   }
 
@@ -499,6 +573,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setStackedCards([])
     setCanStack(false)
     setShowEndGameCards(false)
+    setUnoReminderShown(false)
 
     // Notify other players via Socket.IO
     if (socketClient && socketClient.isConnected() && gameMode === "multi") {
@@ -543,7 +618,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     const card = { ...pendingWildCard, color }
 
-    // Add this line to send the wild color selection specifically:
+    // Send the wild color selection specifically
     sendGameAction("WILD_COLOR_SELECT", { card, playerName })
 
     // Add card to discard pile
@@ -560,8 +635,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     // Check if player should have said UNO
     if (newHand.length === 1 && !playerSaidUno[playerName]) {
-      drawCards(playerName, 2)
-      setGameMessage(`${playerName} forgot to say UNO! Draw 2 cards.`)
+      // Show UNO reminder instead of automatically drawing cards
+      showUnoReminder()
     }
 
     // Handle special card effects
@@ -604,6 +679,24 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setPendingWildCard(null)
   }
 
+  // Show UNO reminder instead of automatically drawing cards
+  const showUnoReminder = () => {
+    if (!unoReminderShown) {
+      setUnoReminderShown(true)
+      setGameMessage(`Don't forget to say UNO! Click the UNO button or you'll draw 2 cards!`)
+      playUnoReminderSound()
+
+      // Set a timer to automatically draw cards if player doesn't say UNO
+      setTimeout(() => {
+        if (playerHands[playerName]?.length === 1 && !playerSaidUno[playerName]) {
+          drawCards(playerName, 2)
+          setGameMessage(`${playerName} forgot to say UNO! Draw 2 cards.`)
+          setUnoReminderShown(false)
+        }
+      }, 5000) // Give player 5 seconds to say UNO
+    }
+  }
+
   const playCard = (cardIndex) => {
     const allPlayers = getAllPlayers()
     const currentPlayer = allPlayers[currentPlayerIndex].name
@@ -619,6 +712,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       return
     }
 
+    // Fix for stacking logic
     const canPlayCard = canStack
       ? (card.value === "draw2" && (topCard.value === "draw2" || stackedCards.some((c) => c.value === "draw2"))) ||
         (card.value === "wild4" &&
@@ -650,11 +744,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         setShowColorSelector(true)
 
         // Send card played action (without color yet)
-        // Replace this line:
-        // sendGameAction("PLAY_CARD", { card, cardIndex, playerName })
-        const color = pendingWildCard.color
         sendGameAction("PLAY_CARD", {
-          card: { ...card, color },
+          card: { ...card },
           cardIndex,
           playerName,
           isWildCard: true,
@@ -685,11 +776,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
         // Check if player should have said UNO
         if (newHand.length === 1 && !playerSaidUno[playerName]) {
-          drawCards(playerName, 2)
-          setGameMessage(`${playerName} forgot to say UNO! Draw 2 cards.`)
+          // Show UNO reminder instead of automatically drawing cards
+          showUnoReminder()
         }
 
-        // Handle stacking
+        // Handle stacking for +2 and +4 cards
         if (currentRoom.settings?.stackingEnabled && (card.value === "draw2" || card.value === "wild4")) {
           const newStackedCards = [...stackedCards, card]
           setStackedCards(newStackedCards)
@@ -861,14 +952,19 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           // Check if next player can stack
           const nextPlayer = allPlayers[nextPlayerIndex].name
           const nextPlayerHand = playerHands[nextPlayer] || []
-          const nextPlayerCanStack = nextPlayerHand.some(
-            (c) =>
-              (c.value === "draw2" && (card.value === "draw2" || newStackedCards.some((sc) => sc.value === "draw2"))) ||
-              (c.value === "wild4" &&
-                (card.value === "wild4" ||
-                  card.value === "draw2" ||
-                  newStackedCards.some((sc) => sc.value === "wild4" || sc.value === "draw2"))),
-          )
+
+          // Improved stacking logic for computer players
+          const nextPlayerCanStack = nextPlayerHand.some((c) => {
+            // For Draw 2, can only stack with another Draw 2
+            if (playedCard.value === "draw2") {
+              return c.value === "draw2"
+            }
+            // For Wild Draw 4, can stack with Wild Draw 4 or Draw 2
+            else if (playedCard.value === "wild4") {
+              return c.value === "wild4" || c.value === "draw2"
+            }
+            return false
+          })
 
           setCanStack(nextPlayerCanStack)
 
@@ -1234,7 +1330,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           gameData: { requesterId: playerId },
         })
       } catch (error) {
-        console.error("Failed to request game state sync:", error)
+        console.error("Failed to send game action:", error)
       }
     }
   }
@@ -1297,6 +1393,15 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       {voiceCommandAlert && (
         <Alert className={`mb-4 ${voiceCommandAlert.type === "success" ? "bg-green-100" : "bg-blue-100"}`}>
           <AlertDescription>{voiceCommandAlert.message}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* UNO reminder alert */}
+      {unoReminderShown && (
+        <Alert className="mb-4 bg-yellow-100 border-yellow-300 animate-pulse">
+          <AlertDescription className="text-yellow-800 font-bold">
+            Don't forget to say UNO! Click the UNO button or you'll draw 2 cards!
+          </AlertDescription>
         </Alert>
       )}
 
@@ -1483,7 +1588,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               <Button
                 onClick={sayUno}
                 disabled={!playerHands[playerName] || playerHands[playerName].length !== 1 || playerSaidUno[playerName]}
-                className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                className={`bg-yellow-500 hover:bg-yellow-600 text-black ${unoReminderShown ? "animate-bounce" : ""}`}
               >
                 Say UNO!
               </Button>
