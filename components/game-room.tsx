@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { PlayerHand } from "@/components/player-hand"
-import { CircularGameLayout } from "@/components/circular-game-layout"
 import { ImprovedGameBoard } from "@/components/improved-game-board"
 import { generateDeck, shuffleDeck, getComputerMove } from "@/lib/game-utils"
 import { PlayerScoreboard } from "@/components/player-scoreboard"
@@ -66,7 +65,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       },
     }
 
-    setGameErrors((prev) => [...prev.slice(-9), errorEntry]) // Keep last 10 errors
+    setGameErrors((prev) => [...prev.slice(-9), errorEntry])
     console.error("🐛 Game Error:", errorEntry)
   }
 
@@ -94,21 +93,16 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         setCurrentRoom(data.room)
         setGameMessage(`${data.player.name} left the room`)
 
-        // If game is active and player left, remove their hand and check for single player
-        if (gameStarted && playerHands[data.player.name]) {
-          const newPlayerHands = { ...playerHands }
-          delete newPlayerHands[data.player.name]
-          setPlayerHands(newPlayerHands)
-
-          // Check if only one player remains
-          setTimeout(checkForSinglePlayerRemaining, 1000)
+        // If game is active and player left, end the game immediately
+        if (gameStarted) {
+          console.log("🛑 Player left during game - ending game")
+          endGameDueToPlayerLeaving(data.player.name)
         }
       }
 
       const handleGameStarted = (data) => {
         console.log("🎮 Game started:", data)
         if (data.gameState) {
-          // Sync game state from server
           setDeck(data.gameState.deck || [])
           setPlayerHands(data.gameState.playerHands || {})
           setDiscardPile(data.gameState.discardPile || [])
@@ -128,7 +122,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       const handleGameUpdate = (data) => {
         console.log("🎮 Game update received:", data)
 
-        // Prevent processing our own updates
         if (data.playerId === playerId) {
           console.log("Ignoring own update")
           return
@@ -137,36 +130,29 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         setSyncInProgress(true)
 
         try {
-          // Handle different types of game updates
           switch (data.action) {
             case "PLAY_CARD":
               handleRemoteCardPlay(data)
               break
-
             case "DRAW_CARDS":
               handleRemoteCardDraw(data)
               break
-
             case "UNO_CALL":
               handleRemoteUnoCall(data)
               break
-
             case "SPECIAL_CARD":
               handleRemoteSpecialCard(data)
               break
-
             case "TURN_CHANGE":
               if (data.data && data.data.currentPlayerIndex !== undefined) {
                 setCurrentPlayerIndex(data.data.currentPlayerIndex)
               }
               break
-
             case "DIRECTION_CHANGE":
               if (data.data && data.data.direction !== undefined) {
                 setDirection(data.data.direction)
               }
               break
-
             case "STACKING":
               if (data.data) {
                 setStackedCards(data.data.stackedCards || [])
@@ -176,15 +162,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 }
               }
               break
-
             case "GAME_STATE_SYNC":
               handleGameStateSync(data)
               break
-
             case "ROUND_WIN":
               handleRemoteRoundWin(data)
               break
-
             default:
               console.log("Unknown game action:", data.action)
           }
@@ -201,14 +184,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         logError("Game start failed", error)
       }
 
-      // Add listeners
       socketClient.on("player-joined", handlePlayerJoined)
       socketClient.on("player-left", handlePlayerLeft)
       socketClient.on("game-started", handleGameStarted)
       socketClient.on("game-update", handleGameUpdate)
       socketClient.on("start-game-error", handleStartGameError)
 
-      // Cleanup listeners on unmount
       return () => {
         socketClient.off("player-joined", handlePlayerJoined)
         socketClient.off("player-left", handlePlayerLeft)
@@ -217,22 +198,41 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         socketClient.off("start-game-error", handleStartGameError)
       }
     }
-  }, [socketClient, gameMode, playerId, playerHands])
+  }, [socketClient, gameMode, playerId, playerHands, gameStarted])
+
+  // End game when player leaves
+  const endGameDueToPlayerLeaving = (leavingPlayerName) => {
+    setGameStarted(false)
+    setGameWinner(null)
+    setRoundWinner(null)
+    setStackedCards([])
+    setCanStack(false)
+    setShowEndGameCards(false)
+    setGameMessage(`Game ended because ${leavingPlayerName} left the room. Returning to lobby...`)
+
+    // Reset game state after a delay
+    setTimeout(() => {
+      setPlayerHands({})
+      setDeck([])
+      setDiscardPile([])
+      setCurrentPlayerIndex(0)
+      setDirection(1)
+      setPlayerSaidUno({})
+      setGameMessage("Ready to start a new game!")
+    }, 3000)
+  }
 
   // Remote game action handlers
   const handleRemoteCardPlay = (data) => {
     if (data.data && data.data.card) {
       const { card } = data.data
 
-      // Update player's hand
       if (playerHands[data.playerName]) {
         const updatedHand = [...playerHands[data.playerName]]
-        // Remove a card of the same type
         const cardIndex = updatedHand.findIndex((c) => c.color === card.color && c.value === card.value)
 
         if (cardIndex !== -1) {
           updatedHand.splice(cardIndex, 1)
-
           setPlayerHands((prev) => ({
             ...prev,
             [data.playerName]: updatedHand,
@@ -240,13 +240,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         }
       }
 
-      // Add card to discard pile
       setDiscardPile((prev) => [...prev, card])
-
-      // Set game message
       setGameMessage(`${data.playerName} played ${card.color} ${card.value}`)
-
-      // Play sound
       playCardSound()
     }
   }
@@ -255,19 +250,18 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     if (data.data) {
       const { player, numCards, drawnCards } = data.data
 
-      // If we have the actual drawn cards, use them
       if (drawnCards && drawnCards.length > 0) {
         setPlayerHands((prev) => ({
           ...prev,
           [player]: [...(prev[player] || []), ...drawnCards],
         }))
       } else {
-        // Otherwise just add placeholder cards for other players
+        // For other players, add proper placeholder cards
         const placeholderCards = Array(numCards)
           .fill()
           .map(() => ({
-            color: "placeholder",
-            value: "card",
+            color: "red", // Use red as default color for back of cards
+            value: "back", // Special value to indicate card back
           }))
 
         setPlayerHands((prev) => ({
@@ -276,13 +270,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         }))
       }
 
-      // Update deck count
       setDeck((prev) => {
         const newDeck = [...prev]
         return newDeck.slice(0, Math.max(0, newDeck.length - numCards))
       })
 
-      // Reset UNO state for player
       setPlayerSaidUno((prev) => ({
         ...prev,
         [player]: false,
@@ -342,7 +334,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         scoringConfig: remoteScoring,
       } = data.data
 
-      // Update all game state at once
       if (deck) setDeck(deck)
       if (playerHands) setPlayerHands(playerHands)
       if (discardPile) setDiscardPile(discardPile)
@@ -433,8 +424,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         points += scoringConfig.wildCard
       } else if (card.value === "wild4") {
         points += scoringConfig.wild4Card
-      } else {
-        // Number cards
+      } else if (card.value !== "back") {
+        // Number cards (exclude card backs)
         const numValue = Number.parseInt(card.value) || 0
         points += numValue * scoringConfig.numberCards
       }
@@ -458,7 +449,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       })
       setPlayerSaidUno(initialUnoState)
 
-      // Add computer players for single player mode
       if (gameMode === "single") {
         const cpuPlayers = []
         const cpuCount = currentRoom.maxPlayers - 1
@@ -547,9 +537,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         firstCard = updatedDeck.pop()
       } while (firstCard && firstCard.color === "wild" && updatedDeck.length > 0)
 
-      // If we couldn't find a non-wild card, use any card
       if (!firstCard) {
-        firstCard = { color: "red", value: "1" } // Fallback card
+        firstCard = { color: "red", value: "1" }
       }
 
       const initialUnoState = {}
@@ -569,7 +558,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         scoringConfig,
       }
 
-      // Set local state
       setDeck(updatedDeck)
       setPlayerHands(hands)
       setDiscardPile([firstCard])
@@ -583,7 +571,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setCanStack(false)
       setShowEndGameCards(false)
 
-      // Notify other players via Socket.IO
       if (socketClient && socketClient.isConnected() && gameMode === "multi") {
         try {
           console.log("📡 Sending game start to server...")
@@ -631,11 +618,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     const card = { ...pendingWildCard, color }
 
-    // Add card to discard pile
     setDiscardPile((prev) => [...prev, card])
     setAnimatingCard(null)
 
-    // Check if player has won the round
     const newHand = playerHands[playerName]
     if (newHand.length === 0) {
       handleRoundWin(playerName)
@@ -643,28 +628,23 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       return
     }
 
-    // Check if player should have said UNO
     if (newHand.length === 1 && !playerSaidUno[playerName]) {
       drawCards(playerName, 2)
       setGameMessage(`${playerName} forgot to say UNO! Draw 2 cards.`)
     }
 
-    // Handle special card effects
     if (card.value === "wild4") {
       const allPlayers = getAllPlayers()
       const nextPlayerIndex = getNextPlayerIndex()
       const nextPlayer = allPlayers[nextPlayerIndex].name
 
-      // Apply draw 4 effect
       setTimeout(() => {
         drawCards(nextPlayer, 4)
         setGameMessage(`Color changed to ${color}! ${nextPlayer} draws 4 cards and loses a turn!`)
 
-        // Skip to the next player
         const skipIndex = getNextPlayerIndex(nextPlayerIndex)
         setCurrentPlayerIndex(skipIndex)
 
-        // Send game actions
         sendGameAction("SPECIAL_CARD", { card })
         sendGameAction("TURN_CHANGE", { currentPlayerIndex: skipIndex })
 
@@ -673,14 +653,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         }
       }, 500)
     } else {
-      // For regular wild cards
       setGameMessage(`Color changed to ${color}!`)
 
-      // Move to next player
       const nextPlayerIndex = getNextPlayerIndex()
       setCurrentPlayerIndex(nextPlayerIndex)
 
-      // Send game actions
       sendGameAction("SPECIAL_CARD", { card })
       sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
 
@@ -702,30 +679,24 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       const card = playerHands[playerName][cardIndex]
       const topCard = discardPile[discardPile.length - 1]
 
-      // Safety check for card and topCard
       if (!card || !topCard) {
         logError("Invalid card or top card", { card, topCard })
         return
       }
 
+      // Enhanced stacking logic
       const canPlayCard = canStack
-        ? (card.value === "draw2" && (topCard.value === "draw2" || stackedCards.some((c) => c.value === "draw2"))) ||
-          (card.value === "wild4" &&
-            (topCard.value === "wild4" ||
-              topCard.value === "draw2" ||
-              stackedCards.some((c) => c.value === "wild4" || c.value === "draw2")))
-        : card.color === topCard.color || card.value === topCard.value || card.color === "wild"
+        ? // When stacking is active, only allow +2 or +4 cards
+          card.value === "draw2" || card.value === "wild4"
+        : // Normal play rules
+          card.color === topCard.color || card.value === topCard.value || card.color === "wild"
 
       if (canPlayCard) {
-        // Play sound
         playCardSound()
-
-        // Set animating card
         setAnimatingCard({ ...card, playerName })
 
         // For wild cards, show color selector
         if (card.color === "wild") {
-          // Remove card from player's hand
           const newHand = [...playerHands[playerName]]
           newHand.splice(cardIndex, 1)
 
@@ -734,17 +705,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             [playerName]: newHand,
           })
 
-          // Store the wild card for later processing
           setPendingWildCard(card)
           setShowColorSelector(true)
-
-          // Send card played action (without color yet)
           sendGameAction("PLAY_CARD", { card, cardIndex, playerName })
-
           return
         }
 
-        // Remove card from player's hand after animation delay
         setTimeout(() => {
           const newHand = [...playerHands[playerName]]
           newHand.splice(cardIndex, 1)
@@ -754,17 +720,14 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             [playerName]: newHand,
           })
 
-          // Add card to discard pile
           setDiscardPile([...discardPile, card])
           setAnimatingCard(null)
 
-          // Check if player has won the round
           if (newHand.length === 0) {
             handleRoundWin(playerName)
             return
           }
 
-          // Check if player should have said UNO
           if (newHand.length === 1 && !playerSaidUno[playerName]) {
             drawCards(playerName, 2)
             setGameMessage(`${playerName} forgot to say UNO! Draw 2 cards.`)
@@ -774,45 +737,39 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           if (currentRoom.settings?.stackingEnabled && (card.value === "draw2" || card.value === "wild4")) {
             handleStackingCard(card, allPlayers)
           } else {
-            // Handle special cards normally
             handleSpecialCard(card)
           }
         }, 500)
 
-        // Send card played action
         sendGameAction("PLAY_CARD", { card, cardIndex, playerName })
       } else {
-        setGameMessage("Invalid move! The card must match in color or value.")
+        if (canStack) {
+          setGameMessage("You must play a +2 or +4 card, or draw cards!")
+        } else {
+          setGameMessage("Invalid move! The card must match in color or value.")
+        }
       }
     } catch (error) {
       logError("Failed to play card", { cardIndex, error: error.message })
     }
   }
 
-  // Handle stacking logic for +2 and +4 cards
+  // Enhanced stacking logic
   const handleStackingCard = (card, allPlayers) => {
     const newStackedCards = [...stackedCards, card]
     setStackedCards(newStackedCards)
 
-    // Move to next player
     const nextPlayerIndex = getNextPlayerIndex()
     setCurrentPlayerIndex(nextPlayerIndex)
 
-    // Check if next player can stack
     const nextPlayer = allPlayers[nextPlayerIndex].name
     const nextPlayerHand = playerHands[nextPlayer] || []
-    const nextPlayerCanStack = nextPlayerHand.some(
-      (c) =>
-        (c.value === "draw2" && (card.value === "draw2" || newStackedCards.some((sc) => sc.value === "draw2"))) ||
-        (c.value === "wild4" &&
-          (card.value === "wild4" ||
-            card.value === "draw2" ||
-            newStackedCards.some((sc) => sc.value === "wild4" || sc.value === "draw2"))),
-    )
+
+    // Check if next player can stack (has +2 or +4 cards)
+    const nextPlayerCanStack = nextPlayerHand.some((c) => c.value === "draw2" || c.value === "wild4")
 
     setCanStack(nextPlayerCanStack)
 
-    // Send stacking update
     sendGameAction("STACKING", {
       stackedCards: newStackedCards,
       canStack: nextPlayerCanStack,
@@ -827,7 +784,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
       setTimeout(() => {
         drawCards(nextPlayer, totalDraw)
-        setGameMessage(`${nextPlayer} draws ${totalDraw} cards from stacked cards!`)
+        setGameMessage(`${nextPlayer} draws ${totalDraw} cards from stacked effects!`)
         setStackedCards([])
         setCanStack(false)
 
@@ -836,7 +793,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           const skipIndex = getNextPlayerIndex(nextPlayerIndex)
           setCurrentPlayerIndex(skipIndex)
 
-          // Send turn change
           sendGameAction("TURN_CHANGE", { currentPlayerIndex: skipIndex })
 
           if (gameMode === "single") {
@@ -845,7 +801,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         }, 1000)
       }, 500)
     } else {
-      // Next player can stack, continue with their turn
       if (gameMode === "single") {
         setTimeout(runComputerTurns, 1000)
       }
@@ -859,7 +814,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     const allPlayers = getAllPlayers()
     const currentPlayer = allPlayers[currentPlayerIndex]
 
-    // If current player is a computer
     if (currentPlayer && computerPlayers.some((cp) => cp.name === currentPlayer.name)) {
       setTimeout(() => {
         playComputerTurn(currentPlayer)
@@ -873,13 +827,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       const topCard = discardPile[discardPile.length - 1]
       const computerHand = playerHands[computerPlayer.name] || []
 
-      // Safety check
       if (!topCard) {
         logError("No top card available for computer turn")
         return
       }
 
-      // Get computer move based on difficulty
       const { move, cardIndex, chosenColor } = getComputerMove(
         computerHand,
         topCard,
@@ -890,9 +842,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       if (move === "play") {
         const card = computerHand[cardIndex]
 
-        // Check if computer should say UNO
         if (computerHand.length === 2) {
-          const willSayUno = Math.random() > 0.2 // 80% chance computer says UNO
+          const willSayUno = Math.random() > 0.2
 
           if (willSayUno) {
             setPlayerSaidUno({
@@ -904,13 +855,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           }
         }
 
-        // Play sound
         playCardSound()
-
-        // Set animating card
         setAnimatingCard({ ...card, playerName: computerPlayer.name })
 
-        // Remove card from computer's hand after animation delay
         setTimeout(() => {
           const newHand = [...computerHand]
           newHand.splice(cardIndex, 1)
@@ -920,44 +867,36 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             [computerPlayer.name]: newHand,
           })
 
-          // Add card to discard pile
           const playedCard = card.color === "wild" ? { ...card, color: chosenColor } : card
           setDiscardPile([...discardPile, playedCard])
           setAnimatingCard(null)
 
-          // Check if computer has won the round
           if (newHand.length === 0) {
             handleRoundWin(computerPlayer.name)
             return
           }
 
-          // Check if computer should have said UNO
           if (newHand.length === 1 && !playerSaidUno[computerPlayer.name]) {
             drawCards(computerPlayer.name, 2)
             setGameMessage(`${computerPlayer.name} forgot to say UNO! Draw 2 cards.`)
           }
 
-          // Handle stacking for +2 and +4 cards
           if (currentRoom.settings?.stackingEnabled && (card.value === "draw2" || card.value === "wild4")) {
             const allPlayers = getAllPlayers()
             handleStackingCard(playedCard, allPlayers)
           } else {
-            // Set wild card color if needed
             if (card.value === "wild" || card.value === "wild4") {
               playedCard.color = chosenColor
               setGameMessage(`${computerPlayer.name} changed the color to ${chosenColor}!`)
             }
 
-            // Handle special cards normally
             handleSpecialCard(playedCard, true)
           }
         }, 500)
       } else {
-        // Draw a card
         drawCards(computerPlayer.name, 1)
         setGameMessage(`${computerPlayer.name} drew a card.`)
 
-        // Move to next player
         setTimeout(() => {
           setCurrentPlayerIndex(getNextPlayerIndex())
           runComputerTurns()
@@ -971,13 +910,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   // Handle round win
   const handleRoundWin = (winner) => {
     try {
-      // Play win sound
       playWinSound()
-
-      // Show all players' cards
       setShowEndGameCards(true)
 
-      // Calculate points from other players' hands using custom scoring
       let points = 0
       Object.entries(playerHands).forEach(([player, hand]) => {
         if (player !== winner) {
@@ -985,14 +920,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         }
       })
 
-      // Update scores
       const newScores = {
         ...playerScores,
         [winner]: playerScores[winner] + points,
       }
       setPlayerScores(newScores)
 
-      // Check if player has reached the target score
       setTimeout(() => {
         if (newScores[winner] >= scoringConfig.pointsToWin) {
           setGameWinner(winner)
@@ -1006,30 +939,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       sendGameAction("ROUND_WIN", { winner, newScores })
     } catch (error) {
       logError("Round win handling failed", { winner, error: error.message })
-    }
-  }
-
-  // Check for single player remaining
-  const checkForSinglePlayerRemaining = () => {
-    const allPlayers = getAllPlayers()
-    const activePlayers = allPlayers.filter((player) => {
-      const hand = playerHands[player.name] || []
-      return hand.length > 0 || player.name === playerName
-    })
-
-    if (activePlayers.length === 1 && gameStarted) {
-      const winner = activePlayers[0].name
-      setGameWinner(winner)
-      setGameMessage(`${winner} wins! All other players have left the game.`)
-      playWinSound()
-
-      // End the game and return to room after 3 seconds
-      setTimeout(() => {
-        setGameStarted(false)
-        setGameWinner(null)
-        setRoundWinner(null)
-        setGameMessage("Game ended. Returning to room...")
-      }, 3000)
     }
   }
 
@@ -1049,11 +958,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       switch (card.value) {
         case "skip":
           setGameMessage(`${allPlayers[nextPlayerIndex].name}'s turn is skipped!`)
-          // Skip to the next player
           const skipIndex = getNextPlayerIndex(nextPlayerIndex)
           setCurrentPlayerIndex(skipIndex)
 
-          // Send turn change
           sendGameAction("SPECIAL_CARD", { card })
           sendGameAction("TURN_CHANGE", { currentPlayerIndex: skipIndex })
 
@@ -1067,7 +974,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           setDirection(newDirection)
           setGameMessage(`Direction reversed!`)
 
-          // In a 2-player game, reverse acts like skip
           let newPlayerIndex
           if (allPlayers.length === 2) {
             newPlayerIndex = currentPlayerIndex
@@ -1077,7 +983,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
           setCurrentPlayerIndex(newPlayerIndex)
 
-          // Send direction change and turn change
           sendGameAction("SPECIAL_CARD", { card })
           sendGameAction("DIRECTION_CHANGE", { direction: newDirection })
           sendGameAction("TURN_CHANGE", { currentPlayerIndex: newPlayerIndex })
@@ -1091,16 +996,13 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           if (!canStack) {
             const targetPlayer = allPlayers[nextPlayerIndex].name
 
-            // Apply draw 2 effect
             setTimeout(() => {
               drawCards(targetPlayer, 2)
               setGameMessage(`${targetPlayer} draws 2 cards and loses a turn!`)
 
-              // Skip to the next player
               const draw2Index = getNextPlayerIndex(nextPlayerIndex)
               setCurrentPlayerIndex(draw2Index)
 
-              // Send special card and turn change
               sendGameAction("SPECIAL_CARD", { card })
               sendGameAction("TURN_CHANGE", { currentPlayerIndex: draw2Index })
 
@@ -1112,11 +1014,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           break
 
         case "wild":
-          // Color already set for wild cards
           setGameMessage(`Color changed to ${card.color}!`)
           setCurrentPlayerIndex(nextPlayerIndex)
 
-          // Send special card and turn change
           sendGameAction("SPECIAL_CARD", { card })
           sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
 
@@ -1127,19 +1027,15 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
         case "wild4":
           if (!canStack) {
-            // Color already set for wild cards
             const wild4Target = allPlayers[nextPlayerIndex].name
 
-            // Apply wild draw 4 effect
             setTimeout(() => {
               drawCards(wild4Target, 4)
               setGameMessage(`Color changed to ${card.color}! ${wild4Target} draws 4 cards and loses a turn!`)
 
-              // Skip to the next player
               const wild4Index = getNextPlayerIndex(nextPlayerIndex)
               setCurrentPlayerIndex(wild4Index)
 
-              // Send special card and turn change
               sendGameAction("SPECIAL_CARD", { card })
               sendGameAction("TURN_CHANGE", { currentPlayerIndex: wild4Index })
 
@@ -1153,7 +1049,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         default:
           setCurrentPlayerIndex(nextPlayerIndex)
 
-          // Send turn change
           sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
 
           if (isComputerTurn && gameMode === "single") {
@@ -1182,15 +1077,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   const drawCards = (player, numCards) => {
     try {
       setDrawAnimation(true)
-
-      // Play sound
       playDrawSound()
 
       setTimeout(() => {
         let currentDeck = [...deck]
         const drawnCards = []
 
-        // If deck is empty, shuffle discard pile except top card
         if (currentDeck.length < numCards) {
           const topCard = discardPile[discardPile.length - 1]
           const newDeck = shuffleDeck(discardPile.slice(0, -1))
@@ -1198,34 +1090,28 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           setDiscardPile([topCard])
         }
 
-        // Draw cards
         for (let i = 0; i < numCards; i++) {
           if (currentDeck.length > 0) {
             drawnCards.push(currentDeck.pop())
           }
         }
 
-        // Update hands
         setPlayerHands({
           ...playerHands,
           [player]: [...(playerHands[player] || []), ...drawnCards],
         })
 
-        // Reset UNO state for player
         setPlayerSaidUno({
           ...playerSaidUno,
           [player]: false,
         })
 
-        // Update deck
         setDeck(currentDeck)
         setDrawAnimation(false)
 
-        // Send drawn cards to other players if this is the current player
         if (player === playerName) {
           sendGameAction("DRAW_CARDS", { player, numCards, drawnCards })
         } else {
-          // Otherwise just send the count
           sendGameAction("DRAW_CARDS", { player, numCards })
         }
       }, 300)
@@ -1240,25 +1126,43 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       const allPlayers = getAllPlayers()
       const currentPlayer = allPlayers[currentPlayerIndex]?.name
 
-      // Only allow the current player to draw
-      if (currentPlayer !== playerName || !gameStarted || canStack) return
+      if (currentPlayer !== playerName || !gameStarted) return
 
-      drawCards(playerName, 1)
-      setGameMessage(`${playerName} drew a card.`)
+      if (canStack) {
+        // If stacking is active, draw all stacked cards
+        const totalDraw = stackedCards.reduce((total, card) => {
+          return total + (card.value === "draw2" ? 2 : 4)
+        }, 0)
 
-      // Move to next player
-      setTimeout(() => {
-        const nextPlayerIndex = getNextPlayerIndex()
-        setCurrentPlayerIndex(nextPlayerIndex)
+        drawCards(playerName, totalDraw)
+        setGameMessage(`${playerName} drew ${totalDraw} cards from stacked effects!`)
+        setStackedCards([])
+        setCanStack(false)
 
-        // Send turn change
-        sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
+        setTimeout(() => {
+          const nextPlayerIndex = getNextPlayerIndex()
+          setCurrentPlayerIndex(nextPlayerIndex)
+          sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
 
-        // Run computer turns in single player mode
-        if (gameMode === "single") {
-          setTimeout(runComputerTurns, 1000)
-        }
-      }, 1000)
+          if (gameMode === "single") {
+            setTimeout(runComputerTurns, 1000)
+          }
+        }, 1000)
+      } else {
+        // Normal draw
+        drawCards(playerName, 1)
+        setGameMessage(`${playerName} drew a card.`)
+
+        setTimeout(() => {
+          const nextPlayerIndex = getNextPlayerIndex()
+          setCurrentPlayerIndex(nextPlayerIndex)
+          sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
+
+          if (gameMode === "single") {
+            setTimeout(runComputerTurns, 1000)
+          }
+        }, 1000)
+      }
     } catch (error) {
       logError("Handle draw card failed", error)
     }
@@ -1322,7 +1226,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     if (discardPile.length > 0) {
       return discardPile[discardPile.length - 1]
     }
-    // Fallback card if no discard pile
     return { color: "red", value: "1" }
   }
 
@@ -1602,8 +1505,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
             {canStack && (
               <p className="text-yellow-300 text-sm mt-2">
-                You can stack a {stackedCards[stackedCards.length - 1]?.value === "draw2" ? "Draw 2" : "Wild Draw 4"}{" "}
-                card or draw {stackedCards.reduce((total, c) => total + (c.value === "draw2" ? 2 : 4), 0)} cards!
+                You can stack a +2 or +4 card, or draw{" "}
+                {stackedCards.reduce((total, c) => total + (c.value === "draw2" ? 2 : 4), 0)} cards!
               </p>
             )}
           </div>
@@ -1614,7 +1517,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             pointsToWin={scoringConfig.pointsToWin}
           />
 
-          {/* Improved game board */}
+          {/* Improved game board - ONLY UI */}
           <div className="mt-4">
             <ImprovedGameBoard
               topCard={getTopCard()}
@@ -1627,24 +1530,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               stackedCards={stackedCards}
               direction={direction}
               canStack={canStack}
-            />
-          </div>
-
-          {/* Circular game layout for other players */}
-          <div className="mt-4">
-            <CircularGameLayout
-              players={gameMode === "single" ? [{ name: playerName }, ...computerPlayers] : currentRoom.players}
-              playerHands={playerHands}
-              playerName={playerName}
-              currentPlayer={getCurrentPlayerName()}
-              playerSaidUno={playerSaidUno}
-              showEndGameCards={showEndGameCards}
-              topCard={getTopCard()}
-              deckCount={deck.length}
-              onDrawCard={handleDrawCard}
-              animatingCard={animatingCard}
-              drawAnimation={drawAnimation}
-              stackedCards={stackedCards}
             />
           </div>
 

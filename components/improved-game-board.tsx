@@ -1,7 +1,6 @@
 "use client"
 
 import { Card } from "./card"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 
@@ -36,6 +35,9 @@ export function ImprovedGameBoard({
     }, 0)
   }
 
+  const isPlayerTurn = currentPlayer === currentPlayerName
+  const canPlayerDraw = isPlayerTurn && !canStack
+
   return (
     <div className="flex flex-col items-center">
       {/* Direction indicator */}
@@ -58,10 +60,10 @@ export function ImprovedGameBoard({
             {/* Base discard pile with multiple card effect */}
             <div className="relative">
               <div className="absolute top-1 left-1 opacity-30">
-                <Card color="gray" value="?" playable={false} />
+                <div className="w-16 h-24 bg-gray-600 rounded-lg"></div>
               </div>
               <div className="absolute top-0.5 left-0.5 opacity-60">
-                <Card color="gray" value="?" playable={false} />
+                <div className="w-16 h-24 bg-gray-700 rounded-lg"></div>
               </div>
               <Card color={topCard.color} value={topCard.value} playable={false} />
             </div>
@@ -97,7 +99,7 @@ export function ImprovedGameBoard({
           )}
         </div>
 
-        {/* Draw pile */}
+        {/* Draw pile - Fixed */}
         <div className="text-center relative">
           <p className="text-white mb-3 font-medium">Draw Pile</p>
           <div className="relative">
@@ -109,30 +111,41 @@ export function ImprovedGameBoard({
               <div className="w-16 h-24 bg-red-650 rounded-lg"></div>
             </div>
 
-            <Button
-              onClick={onDrawCard}
-              disabled={currentPlayer !== currentPlayerName || canStack}
+            {/* Main draw pile button */}
+            <div
               className={cn(
-                "w-16 h-24 bg-red-600 hover:bg-red-700 rounded-lg flex flex-col items-center justify-center relative overflow-hidden",
+                "w-16 h-24 bg-red-600 rounded-lg flex flex-col items-center justify-center relative overflow-hidden cursor-pointer transition-all duration-200",
                 drawAnimation && "animate-card-draw",
-                currentPlayer === currentPlayerName && !canStack && "ring-2 ring-yellow-400 ring-offset-2",
-                canStack && "opacity-50 cursor-not-allowed",
+                canPlayerDraw && "ring-2 ring-yellow-400 ring-offset-2 hover:bg-red-700 hover:scale-105",
+                !canPlayerDraw && "opacity-50 cursor-not-allowed",
               )}
+              onClick={canPlayerDraw ? onDrawCard : undefined}
             >
               <span className="text-white font-bold text-lg">UNO</span>
-              <span className="text-white text-xs mt-1">DRAW</span>
+              <span className="text-white text-xs mt-1">{canPlayerDraw ? "DRAW" : canStack ? "STACK" : "WAIT"}</span>
 
               {/* Card count badge */}
               <div className="absolute -top-2 -right-2 bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
                 {deckCount}
               </div>
-            </Button>
+
+              {/* Hover effect for active state */}
+              {canPlayerDraw && (
+                <div className="absolute inset-0 bg-white/0 hover:bg-white/10 transition-colors duration-200"></div>
+              )}
+            </div>
           </div>
 
           {/* Draw instruction */}
-          {currentPlayer === currentPlayerName && !canStack && (
+          {canPlayerDraw && (
             <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-yellow-300 text-xs font-bold animate-pulse">
               Your Turn - Click to Draw
+            </div>
+          )}
+
+          {canStack && (
+            <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-red-300 text-xs font-bold">
+              Play +2/+4 or Draw {getStackedCardsTotal()}
             </div>
           )}
         </div>
@@ -150,7 +163,7 @@ export function ImprovedGameBoard({
         {canStack && (
           <div className="px-4 py-2 bg-red-500/80 backdrop-blur-sm rounded-full">
             <p className="text-white font-medium text-center text-sm">
-              ⚡ Stacking Mode: Play a matching card or draw {getStackedCardsTotal()} cards!
+              ⚡ Stacking Mode: Play a +2 or +4 card, or draw {getStackedCardsTotal()} cards!
             </p>
           </div>
         )}
