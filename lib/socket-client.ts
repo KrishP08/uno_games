@@ -178,6 +178,11 @@ export class SocketClient {
     if (this.isConnected()) {
       try {
         console.log(`📤 Sending game action: ${actionData.action}`, actionData)
+
+        // Add unique ID to track this specific action
+        const actionId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+        actionData.actionId = actionId
+
         this.emit("game-action", actionData)
 
         // Store the last action for potential retry
@@ -191,7 +196,7 @@ export class SocketClient {
             this.emit("game-action", actionData)
             this._lastAction = null
           }
-        }, 1000) // Reduced timeout for faster retry
+        }, 500) // Reduced timeout for faster retry
       } catch (error) {
         console.error("❌ Error sending game action:", error)
         this.queueAction(actionData)
@@ -256,5 +261,17 @@ export class SocketClient {
   // Clear cached game state
   clearCachedGameState() {
     this.gameStateCache = null
+  }
+
+  // Add this new method to force a full game state sync
+  forceGameStateSync(roomId: string, gameState: any) {
+    if (this.isConnected()) {
+      console.log("🔄 Forcing complete game state sync")
+      this.gameAction({
+        roomId,
+        action: "GAME_STATE_SYNC",
+        data: gameState,
+      })
+    }
   }
 }

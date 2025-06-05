@@ -13,6 +13,10 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: false,
   },
+  // Increase ping timeout for better connection stability
+  pingTimeout: 60000,
+  // Reduce ping interval for faster disconnect detection
+  pingInterval: 25000,
 })
 
 app.use(cors())
@@ -24,6 +28,7 @@ app.get("/", (req, res) => {
     status: "UNO Game Server is running!",
     timestamp: new Date().toISOString(),
     activeRooms: Object.keys(gameRooms).length,
+    activePlayers: Object.keys(playerSockets).length,
   })
 })
 
@@ -35,6 +40,7 @@ app.get("/health", (req, res) => {
 // Store game rooms and players
 const gameRooms = {}
 const playerSockets = {}
+const actionLog = {} // Track recent actions to prevent duplicates
 
 // Helper function to generate room codes
 function generateRoomCode() {
@@ -55,6 +61,35 @@ function cleanupRoom(roomId) {
     delete gameRooms[roomId]
     console.log(`🗑️ Cleaned up empty room: ${roomId}`)
   }
+}
+
+// Helper function to log and track actions
+function logAction(roomId, action, playerId) {
+  if (!actionLog[roomId]) {
+    actionLog[roomId] = []
+  }
+
+  const actionEntry = {
+    action,
+    playerId,
+    timestamp: Date.now(),
+    id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+  }
+
+  actionLog[roomId].push(actionEntry)
+
+  // Keep only the last 100 actions
+  if (actionLog[roomId].length > 100) {
+    actionLog[roomId] = actionLog[roomId].slice(-100)
+  }
+
+  return actionEntry.id
+}
+
+// Helper function to check if an action is a duplicate
+function isDuplicateAction(roomId, actionId) {
+  if (!actionLog[roomId]) return false
+  return actionLog[roomId].some((entry) => entry.id === actionId)
 }
 
 io.on("connection", (socket) => {
@@ -114,6 +149,7 @@ io.on("connection", (socket) => {
       },
       gameStarted: false,
       createdAt: Date.now(),
+      lastActivity: Date.now(),
     }
 
     gameRooms[roomId] = newRoom
@@ -172,6 +208,7 @@ io.on("connection", (socket) => {
 
     room.players.push(player)
     playerSockets[socket.id] = { playerId, playerName, roomId: room.id }
+    room.lastActivity = Date.now()
 
     socket.join(room.id)
 
@@ -200,6 +237,7 @@ io.on("connection", (socket) => {
 
     const player = room.players[playerIndex]
     room.players.splice(playerIndex, 1)
+    room.lastActivity = Date.now()
 
     socket.leave(roomId)
     delete playerSockets[socket.id]
@@ -225,7 +263,7 @@ io.on("connection", (socket) => {
 
   // Handle game actions (card plays, draws, etc.)
   socket.on("game-action", (data) => {
-    const { roomId, action, gameData } = data
+    const { roomId, action, gameData, actionId } = data
     const room = gameRooms[roomId]
 
     if (!room) {
@@ -233,7 +271,18 @@ io.on("connection", (socket) => {
       return
     }
 
+    // Check for duplicate actions (prevents double processing)
+    if (actionId && isDuplicateAction(roomId, actionId)) {
+      console.log(`⚠️ Duplicate action detected, ignoring: ${action} (${actionId})`)
+      socket.emit("action-confirmed", { action, actionId })
+      return
+    }
+
+    // Log this action
+    const loggedActionId = logAction(roomId, action, playerSockets[socket.id]?.playerId)
+
     console.log(`🎮 Game action in ${room.name}: ${action} from ${playerSockets[socket.id]?.playerName}`)
+    room.lastActivity = Date.now()
 
     // Update room game state if provided
     if (gameData) {
@@ -248,15 +297,16 @@ io.on("connection", (socket) => {
       playerId: playerSockets[socket.id]?.playerId,
       playerName: playerSockets[socket.id]?.playerName,
       timestamp: Date.now(),
+      actionId: loggedActionId,
     }
 
-    console.log(`📡 Broadcasting to room ${roomId}:`, gameUpdate)
+    console.log(`📡 Broadcasting to room ${roomId}:`, action)
 
     // Send to all players in the room
     io.to(roomId).emit("game-update", gameUpdate)
 
     // Also send confirmation back to sender
-    socket.emit("action-confirmed", { action, timestamp: gameUpdate.timestamp })
+    socket.emit("action-confirmed", { action, actionId: loggedActionId })
   })
 
   // Handle starting a game
@@ -295,6 +345,7 @@ io.on("connection", (socket) => {
     }
 
     room.gameStarted = true
+    room.lastActivity = Date.now()
 
     console.log(`🎮 Game started in room: ${room.name} with ${room.players.length} players`)
 
@@ -306,6 +357,11 @@ io.on("connection", (socket) => {
 
     // Broadcast updated room list
     io.emit("room-list", Object.values(gameRooms))
+  })
+
+  // Handle action confirmations
+  socket.on("action-confirmed", (data) => {
+    console.log(`✅ Action confirmed by client: ${data.action}`)
   })
 
   // Handle disconnect
@@ -323,6 +379,7 @@ io.on("connection", (socket) => {
         if (playerIndex !== -1) {
           const player = room.players[playerIndex]
           room.players.splice(playerIndex, 1)
+          room.lastActivity = Date.now()
 
           console.log(`👋 ${playerName} disconnected from room: ${room.name}`)
 
@@ -351,11 +408,6 @@ io.on("connection", (socket) => {
   // Send initial room list when client connects
   const roomList = Object.values(gameRooms)
   socket.emit("room-list", roomList)
-
-  // Handle action confirmations
-  socket.on("action-confirmed", (data) => {
-    console.log(`✅ Action confirmed: ${data.action}`)
-  })
 })
 
 // Cleanup old rooms periodically (every 30 minutes)
@@ -366,7 +418,7 @@ setInterval(
 
     Object.entries(gameRooms).forEach(([roomId, room]) => {
       // Remove rooms older than 2 hours with no activity
-      if (now - room.createdAt > 2 * 60 * 60 * 1000) {
+      if (now - (room.lastActivity || room.createdAt) > 2 * 60 * 60 * 1000) {
         roomsToDelete.push(roomId)
       }
     })

@@ -106,6 +106,40 @@ export default function UnoGame() {
     socketClient.current.on("game-started", (data) => {
       setStatusMessage(`🎮 Game started in ${data.room.name}!`)
     })
+
+    socketClient.current.on("connect", () => {
+      console.log("✅ Connected to server")
+      setConnectionStatus("connected")
+      setStatusMessage("✅ Connected to UNO multiplayer server!")
+
+      // Get initial room list
+      socketClient.current.getRooms()
+
+      // If we were in a room, try to rejoin and sync state
+      if (currentRoom) {
+        console.log("🔄 Attempting to sync game state after reconnection")
+        forceSyncGameState()
+      }
+    })
+  }
+
+  // Add this function to the UnoGame component to force sync game state
+  const forceSyncGameState = () => {
+    if (socketClient.current && socketClient.current.isConnected() && gameMode === "multi" && currentRoom) {
+      setStatusMessage("🔄 Forcing game state synchronization...")
+
+      // Request a full game state sync from the server
+      socketClient.current.gameAction({
+        roomId: currentRoom.id,
+        action: "REQUEST_SYNC",
+        data: { requesterId: playerId },
+      })
+
+      // Set a timeout to clear the status message
+      setTimeout(() => {
+        setStatusMessage("Game state synchronized")
+      }, 3000)
+    }
   }
 
   const setupOfflineMode = () => {
