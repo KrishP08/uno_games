@@ -51,6 +51,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   // Audio context for sound effects
   const audioContextRef = useRef(null)
 
+  // Check if current player is the host
+  const isHost = () => {
+    return currentRoom && (currentRoom.host === playerId || gameMode === "single")
+  }
+
   // Update room state when prop changes
   useEffect(() => {
     if (room) {
@@ -132,7 +137,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         switch (data.action) {
           case "NEW_ROUND_STARTED":
             console.log("🔄 New round started by host")
-            // Reset all game state for new round
             setRoundWinner(null)
             setGameWinner(null)
             setShowEndGameCards(false)
@@ -171,7 +175,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
               console.log(`🃏 ${data.playerName} played ${card.color} ${card.value}`)
 
-              // Update the player's hand with the complete hand from server
+              // Update the specific player's hand
               if (playerHand && data.playerName) {
                 setPlayerHands((prev) => ({
                   ...prev,
@@ -179,11 +183,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 }))
               }
 
-              // Update discard pile with the complete pile from server
-              if (updatedDiscardPile) {
+              // Update discard pile completely
+              if (updatedDiscardPile && updatedDiscardPile.length > 0) {
                 setDiscardPile(updatedDiscardPile)
               } else {
-                // Add card to discard pile
                 setDiscardPile((prev) => [...prev, card])
               }
 
@@ -210,10 +213,40 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setDrawnThisTurn(0)
               setMustPlayDrawnCard(false)
 
-              // Set game message
-              setGameMessage(`${data.playerName} played ${card.color} ${card.value}`)
+              // Handle special effects
+              if (specialEffect) {
+                if (specialEffect.drawCardCount > 0 && specialEffect.targetPlayer) {
+                  setTimeout(() => {
+                    // Update the target player's hand
+                    setPlayerHands((prev) => {
+                      const targetHand = prev[specialEffect.targetPlayer] || []
+                      const newCards = []
 
-              // Play sound
+                      // Generate valid cards for the target player
+                      for (let i = 0; i < specialEffect.drawCardCount; i++) {
+                        newCards.push({
+                          color: ["red", "blue", "green", "yellow"][Math.floor(Math.random() * 4)],
+                          value: Math.floor(Math.random() * 10).toString(),
+                        })
+                      }
+
+                      return {
+                        ...prev,
+                        [specialEffect.targetPlayer]: [...targetHand, ...newCards],
+                      }
+                    })
+                  }, 500)
+                }
+              }
+
+              // Set game message
+              let message = `${data.playerName} played ${card.color} ${card.value}`
+              if (specialEffect?.skipTurn) message += ` - ${specialEffect.targetPlayer}'s turn is skipped!`
+              if (newDirection !== direction) message += " - Direction reversed!"
+              if (specialEffect?.drawCardCount > 0)
+                message += ` - ${specialEffect.targetPlayer} draws ${specialEffect.drawCardCount} cards!`
+
+              setGameMessage(message)
               playCardSound()
             }
             break
@@ -224,9 +257,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
               console.log(`🎴 ${player} drew ${numCards} cards`)
 
-              // If we have the actual drawn cards, validate and use them
+              // Update the player's hand with drawn cards
               if (drawnCards && drawnCards.length > 0) {
-                // Validate all drawn cards to prevent invalid cards
                 const validDrawnCards = drawnCards.filter((card) => {
                   const validColors = ["red", "blue", "green", "yellow", "wild"]
                   const validValues = [
@@ -256,21 +288,19 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                   }))
                 }
               } else {
-                // Generate proper random cards from the deck instead of invalid placeholders
+                // Generate valid cards if not provided
                 const validCards = []
-                const currentDeck = [...deck]
-
-                for (let i = 0; i < numCards && currentDeck.length > 0; i++) {
-                  const randomIndex = Math.floor(Math.random() * currentDeck.length)
-                  validCards.push(currentDeck[randomIndex])
+                for (let i = 0; i < numCards; i++) {
+                  validCards.push({
+                    color: ["red", "blue", "green", "yellow"][Math.floor(Math.random() * 4)],
+                    value: Math.floor(Math.random() * 10).toString(),
+                  })
                 }
 
-                if (validCards.length > 0) {
-                  setPlayerHands((prev) => ({
-                    ...prev,
-                    [player]: [...(prev[player] || []), ...validCards],
-                  }))
-                }
+                setPlayerHands((prev) => ({
+                  ...prev,
+                  [player]: [...(prev[player] || []), ...validCards],
+                }))
               }
 
               // Update deck count
@@ -287,14 +317,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
               setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
               playDrawSound()
-            }
-            break
-
-          case "PASS_TURN":
-            if (data.data && data.data.currentPlayerIndex !== undefined) {
-              console.log(`⏭️ ${data.playerName} passed their turn`)
-              setCurrentPlayerIndex(data.data.currentPlayerIndex)
-              setGameMessage(`${data.playerName} passed their turn`)
             }
             break
 
@@ -332,10 +354,25 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 setCurrentPlayerIndex(newPlayerIndex)
               }
 
-              // Handle special effects
+              // Handle special effects for Wild Draw 4
               if (specialEffect && specialEffect.drawCardCount > 0 && specialEffect.targetPlayer) {
                 setTimeout(() => {
-                  drawCards(specialEffect.targetPlayer, specialEffect.drawCardCount)
+                  setPlayerHands((prev) => {
+                    const targetHand = prev[specialEffect.targetPlayer] || []
+                    const newCards = []
+
+                    for (let i = 0; i < specialEffect.drawCardCount; i++) {
+                      newCards.push({
+                        color: ["red", "blue", "green", "yellow"][Math.floor(Math.random() * 4)],
+                        value: Math.floor(Math.random() * 10).toString(),
+                      })
+                    }
+
+                    return {
+                      ...prev,
+                      [specialEffect.targetPlayer]: [...targetHand, ...newCards],
+                    }
+                  })
                 }, 500)
               }
 
@@ -345,7 +382,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
           case "GAME_STATE_SYNC":
             if (data.data) {
-              console.log("🔄 Received game state sync")
+              console.log("🔄 Received complete game state sync")
               const {
                 deck,
                 playerHands,
@@ -401,6 +438,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               sendGameAction("GAME_STATE_SYNC", gameState)
             }
             break
+
+          default:
+            console.log("Unknown game action:", data.action)
         }
 
         setSyncInProgress(false)
@@ -434,6 +474,57 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     playerHands,
     gameStarted,
     deck,
+    discardPile,
+    currentPlayerIndex,
+    direction,
+    playerSaidUno,
+    stackedCards,
+    canStack,
+    isHost,
+  ])
+
+  // Periodic game state synchronization for multiplayer
+  useEffect(() => {
+    let syncInterval
+
+    if (gameMode === "multi" && gameStarted && socketClient?.isConnected()) {
+      // Host sends periodic sync every 5 seconds
+      if (isHost()) {
+        syncInterval = setInterval(() => {
+          console.log("🔄 Host sending periodic game state sync")
+
+          const completeGameState = {
+            deck,
+            playerHands,
+            discardPile,
+            currentPlayerIndex,
+            direction,
+            playerSaidUno,
+            stackedCards,
+            canStack,
+            gameStarted,
+            roundWinner,
+            gameWinner,
+            playerScores,
+          }
+
+          sendGameAction("GAME_STATE_SYNC", completeGameState)
+        }, 5000) // Sync every 5 seconds
+      }
+    }
+
+    return () => {
+      if (syncInterval) {
+        clearInterval(syncInterval)
+      }
+    }
+  }, [
+    gameMode,
+    gameStarted,
+    socketClient,
+    isHost,
+    deck,
+    playerHands,
     discardPile,
     currentPlayerIndex,
     direction,
@@ -556,11 +647,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     }
   }
 
-  // Check if current player is the host
-  const isHost = () => {
-    return currentRoom && (currentRoom.host === playerId || gameMode === "single")
-  }
-
   // Check if game can start
   const canStartGame = () => {
     if (gameMode === "single") return true
@@ -582,36 +668,36 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
   const sendGameAction = (action, data) => {
     if (socketClient && socketClient.isConnected() && gameMode === "multi") {
-      // Add timestamp to help track and order events
       const timestamp = Date.now()
 
-      // Create a comprehensive action payload with all necessary state
+      // Create comprehensive action payload with complete game state
       const actionPayload = {
         roomId: currentRoom.id,
         action: action,
         data: {
           ...data,
           playerId,
+          playerName,
           timestamp,
-          // Include critical game state with every action for better sync
-          gameState: {
+          // Include complete game state for better synchronization
+          completeGameState: {
+            deck: deck.length, // Send count only for performance
+            playerHands: Object.keys(playerHands).reduce((acc, name) => {
+              acc[name] = playerHands[name]?.length || 0
+              return acc
+            }, {}),
+            discardPile,
             currentPlayerIndex,
             direction,
             stackedCards,
             canStack,
+            playerSaidUno,
           },
         },
       }
 
       console.log(`📤 Sending ${action} to server:`, actionPayload)
       socketClient.gameAction(actionPayload)
-
-      // For debugging
-      console.log(`Local state after ${action}:`, {
-        currentPlayer: getCurrentPlayerName(),
-        topCard: getTopCard(),
-        playerHands: Object.keys(playerHands).map((name) => ({ name, cards: playerHands[name]?.length })),
-      })
     } else {
       console.log(`Local action: ${action}`, data)
     }
@@ -880,7 +966,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           const playerIndex = Object.keys(playerHands).findIndex((name) => name === currentPlayer.name)
           playCard(cardIndex)
         }, delay)
-        return // Exit the loop and wait for the playCard function to trigger the next turn
+        return // Exit the loopp and wait for the playCard function to trigger the next turn
       } else if (action === "draw") {
         // Draw a card
         const delay = 1000 + Math.random() * 1000 // Add a random delay to simulate thinking
@@ -1096,6 +1182,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           drawCardCount,
           targetPlayer: drawCardCount > 0 ? allPlayers[getNextPlayerIndex()].name : null,
         },
+        // Force immediate sync
+        forceSync: true,
       })
 
       // Handle drawing cards for the next player if needed
