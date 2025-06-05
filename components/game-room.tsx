@@ -103,6 +103,295 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         setGameMessage("Game started!")
       }
 
+      const handleGameUpdate = (data) => {
+        console.log("🎮 Game update received:", data)
+
+        // Prevent processing our own updates
+        if (data.playerId === playerId) {
+          console.log("Ignoring own update")
+          return
+        }
+
+        setSyncInProgress(true)
+
+        // Handle different types of game updates
+        switch (data.action) {
+          case "NEW_ROUND_STARTED":
+            console.log("🔄 New round started by host")
+            // Reset all game state for new round
+            setRoundWinner(null)
+            setGameWinner(null)
+            setShowEndGameCards(false)
+            setGameStarted(true)
+
+            if (data.data) {
+              const { deck, playerHands, discardPile, currentPlayerIndex, direction, playerSaidUno } = data.data
+              setDeck(deck || [])
+              setPlayerHands(playerHands || {})
+              setDiscardPile(discardPile || [])
+              setCurrentPlayerIndex(currentPlayerIndex || 0)
+              setDirection(direction || 1)
+              setPlayerSaidUno(playerSaidUno || {})
+              setStackedCards([])
+              setCanStack(false)
+              setCanDrawMore(false)
+              setDrawnThisTurn(0)
+              setMustPlayDrawnCard(false)
+            }
+            setGameMessage("New round started!")
+            break
+
+          case "PLAY_CARD":
+            if (data.data && data.data.card) {
+              const {
+                card,
+                playerName: cardPlayerName,
+                playerHand,
+                discardPile: updatedDiscardPile,
+                currentPlayerIndex: newPlayerIndex,
+                direction: newDirection,
+                stackedCards: newStackedCards,
+                canStack: newCanStack,
+                specialEffect,
+              } = data.data
+
+              console.log(`🃏 ${data.playerName} played ${card.color} ${card.value}`)
+
+              // Update the player's hand with the complete hand from server
+              if (playerHand && data.playerName) {
+                setPlayerHands((prev) => ({
+                  ...prev,
+                  [data.playerName]: playerHand,
+                }))
+              }
+
+              // Update discard pile with the complete pile from server
+              if (updatedDiscardPile) {
+                setDiscardPile(updatedDiscardPile)
+              } else {
+                // Add card to discard pile
+                setDiscardPile((prev) => [...prev, card])
+              }
+
+              // Update turn system
+              if (newPlayerIndex !== undefined) {
+                setCurrentPlayerIndex(newPlayerIndex)
+              }
+
+              // Update direction if changed
+              if (newDirection !== undefined) {
+                setDirection(newDirection)
+              }
+
+              // Update stacking state
+              if (newStackedCards !== undefined) {
+                setStackedCards(newStackedCards)
+              }
+              if (newCanStack !== undefined) {
+                setCanStack(newCanStack)
+              }
+
+              // Reset draw state for all players when a card is played
+              setCanDrawMore(false)
+              setDrawnThisTurn(0)
+              setMustPlayDrawnCard(false)
+
+              // Set game message
+              setGameMessage(`${data.playerName} played ${card.color} ${card.value}`)
+
+              // Play sound
+              playCardSound()
+            }
+            break
+
+          case "DRAW_CARDS":
+            if (data.data) {
+              const { player, numCards, drawnCards } = data.data
+
+              console.log(`🎴 ${player} drew ${numCards} cards`)
+
+              // If we have the actual drawn cards, validate and use them
+              if (drawnCards && drawnCards.length > 0) {
+                // Validate all drawn cards to prevent invalid cards
+                const validDrawnCards = drawnCards.filter((card) => {
+                  const validColors = ["red", "blue", "green", "yellow", "wild"]
+                  const validValues = [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "skip",
+                    "reverse",
+                    "draw2",
+                    "wild",
+                    "wild4",
+                  ]
+                  return validColors.includes(card.color) && validValues.includes(card.value)
+                })
+
+                if (validDrawnCards.length > 0) {
+                  setPlayerHands((prev) => ({
+                    ...prev,
+                    [player]: [...(prev[player] || []), ...validDrawnCards],
+                  }))
+                }
+              } else {
+                // Generate proper random cards from the deck instead of invalid placeholders
+                const validCards = []
+                const currentDeck = [...deck]
+
+                for (let i = 0; i < numCards && currentDeck.length > 0; i++) {
+                  const randomIndex = Math.floor(Math.random() * currentDeck.length)
+                  validCards.push(currentDeck[randomIndex])
+                }
+
+                if (validCards.length > 0) {
+                  setPlayerHands((prev) => ({
+                    ...prev,
+                    [player]: [...(prev[player] || []), ...validCards],
+                  }))
+                }
+              }
+
+              // Update deck count
+              setDeck((prev) => {
+                const newDeck = [...prev]
+                return newDeck.slice(0, Math.max(0, newDeck.length - numCards))
+              })
+
+              // Reset UNO state for player
+              setPlayerSaidUno((prev) => ({
+                ...prev,
+                [player]: false,
+              }))
+
+              setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
+              playDrawSound()
+            }
+            break
+
+          case "PASS_TURN":
+            if (data.data && data.data.currentPlayerIndex !== undefined) {
+              console.log(`⏭️ ${data.playerName} passed their turn`)
+              setCurrentPlayerIndex(data.data.currentPlayerIndex)
+              setGameMessage(`${data.playerName} passed their turn`)
+            }
+            break
+
+          case "UNO_CALL":
+            if (data.data && data.data.player) {
+              console.log(`🔊 ${data.data.player} said UNO!`)
+              setPlayerSaidUno((prev) => ({
+                ...prev,
+                [data.data.player]: true,
+              }))
+              setGameMessage(`${data.data.player} said UNO!`)
+              playUnoSound()
+            }
+            break
+
+          case "WILD_COLOR_SELECT":
+            if (data.data && data.data.card) {
+              const { card, currentPlayerIndex: newPlayerIndex, specialEffect } = data.data
+
+              console.log(`🌈 ${data.playerName} selected color: ${card.color}`)
+
+              // Update the discard pile with the colored wild card
+              setDiscardPile((prev) => {
+                const newPile = [...prev]
+                if (newPile.length > 0) {
+                  newPile[newPile.length - 1] = card
+                } else {
+                  newPile.push(card)
+                }
+                return newPile
+              })
+
+              // Update current player
+              if (newPlayerIndex !== undefined) {
+                setCurrentPlayerIndex(newPlayerIndex)
+              }
+
+              // Handle special effects
+              if (specialEffect && specialEffect.drawCardCount > 0 && specialEffect.targetPlayer) {
+                setTimeout(() => {
+                  drawCards(specialEffect.targetPlayer, specialEffect.drawCardCount)
+                }, 500)
+              }
+
+              setGameMessage(`${data.playerName} changed the color to ${card.color}!`)
+            }
+            break
+
+          case "GAME_STATE_SYNC":
+            if (data.data) {
+              console.log("🔄 Received game state sync")
+              const {
+                deck,
+                playerHands,
+                discardPile,
+                currentPlayerIndex,
+                direction,
+                playerSaidUno,
+                stackedCards,
+                canStack,
+              } = data.data
+
+              // Update all game state at once
+              if (deck) setDeck(deck)
+              if (playerHands) setPlayerHands(playerHands)
+              if (discardPile) setDiscardPile(discardPile)
+              if (currentPlayerIndex !== undefined) setCurrentPlayerIndex(currentPlayerIndex)
+              if (direction) setDirection(direction)
+              if (playerSaidUno) setPlayerSaidUno(playerSaidUno)
+              if (stackedCards) setStackedCards(stackedCards)
+              if (canStack !== undefined) setCanStack(canStack)
+
+              setGameMessage("Game state synchronized")
+            }
+            break
+
+          case "ROUND_WIN":
+            if (data.data && data.data.winner) {
+              const { winner, newScores } = data.data
+              setRoundWinner(winner)
+              if (newScores) setPlayerScores(newScores)
+              setShowEndGameCards(true)
+              setGameMessage(`${winner} wins the round!`)
+              playWinSound()
+            }
+            break
+
+          case "REQUEST_SYNC":
+            if (data.data && data.data.requesterId && isHost()) {
+              console.log("🔄 Received sync request from player:", data.data.requesterId)
+
+              // Host responds with complete game state
+              const gameState = {
+                deck,
+                playerHands,
+                discardPile,
+                currentPlayerIndex,
+                direction,
+                playerSaidUno,
+                stackedCards,
+                canStack,
+              }
+
+              sendGameAction("GAME_STATE_SYNC", gameState)
+            }
+            break
+        }
+
+        setSyncInProgress(false)
+      }
+
       const handleStartGameError = (error) => {
         console.log("❌ Start game error:", error)
         setGameMessage(`Error: ${error.message}`)
@@ -124,7 +413,20 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         socketClient.off("start-game-error", handleStartGameError)
       }
     }
-  }, [socketClient, gameMode, playerId, playerHands])
+  }, [
+    socketClient,
+    gameMode,
+    playerId,
+    playerHands,
+    gameStarted,
+    deck,
+    discardPile,
+    currentPlayerIndex,
+    direction,
+    playerSaidUno,
+    stackedCards,
+    canStack,
+  ])
 
   // Initialize audio context
   useEffect(() => {
@@ -959,294 +1261,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   // Replace the handleColorSelect function with this fixed version
 
   // Replace the handleGameUpdate function in the useEffect
-  const handleGameUpdate = (data) => {
-    console.log("🎮 Game update received:", data)
-
-    // Prevent processing our own updates
-    if (data.playerId === playerId) {
-      console.log("Ignoring own update")
-      return
-    }
-
-    setSyncInProgress(true)
-
-    // Handle different types of game updates
-    switch (data.action) {
-      case "NEW_ROUND_STARTED":
-        console.log("🔄 New round started by host")
-        // Reset all game state for new round
-        setRoundWinner(null)
-        setGameWinner(null)
-        setShowEndGameCards(false)
-        setGameStarted(true)
-
-        if (data.data) {
-          const { deck, playerHands, discardPile, currentPlayerIndex, direction, playerSaidUno } = data.data
-          setDeck(deck || [])
-          setPlayerHands(playerHands || {})
-          setDiscardPile(discardPile || [])
-          setCurrentPlayerIndex(currentPlayerIndex || 0)
-          setDirection(direction || 1)
-          setPlayerSaidUno(playerSaidUno || {})
-          setStackedCards([])
-          setCanStack(false)
-          setCanDrawMore(false)
-          setDrawnThisTurn(0)
-          setMustPlayDrawnCard(false)
-        }
-        setGameMessage("New round started!")
-        break
-
-      case "PLAY_CARD":
-        if (data.data && data.data.card) {
-          const {
-            card,
-            playerName: cardPlayerName,
-            playerHand,
-            discardPile: updatedDiscardPile,
-            currentPlayerIndex: newPlayerIndex,
-            direction: newDirection,
-            stackedCards: newStackedCards,
-            canStack: newCanStack,
-            specialEffect,
-          } = data.data
-
-          console.log(`🃏 ${data.playerName} played ${card.color} ${card.value}`)
-
-          // Update the player's hand with the complete hand from server
-          if (playerHand && data.playerName) {
-            setPlayerHands((prev) => ({
-              ...prev,
-              [data.playerName]: playerHand,
-            }))
-          }
-
-          // Update discard pile with the complete pile from server
-          if (updatedDiscardPile) {
-            setDiscardPile(updatedDiscardPile)
-          } else {
-            // Add card to discard pile
-            setDiscardPile((prev) => [...prev, card])
-          }
-
-          // Update turn system
-          if (newPlayerIndex !== undefined) {
-            setCurrentPlayerIndex(newPlayerIndex)
-          }
-
-          // Update direction if changed
-          if (newDirection !== undefined) {
-            setDirection(newDirection)
-          }
-
-          // Update stacking state
-          if (newStackedCards !== undefined) {
-            setStackedCards(newStackedCards)
-          }
-          if (newCanStack !== undefined) {
-            setCanStack(newCanStack)
-          }
-
-          // Reset draw state for all players when a card is played
-          setCanDrawMore(false)
-          setDrawnThisTurn(0)
-          setMustPlayDrawnCard(false)
-
-          // Set game message
-          setGameMessage(`${data.playerName} played ${card.color} ${card.value}`)
-
-          // Play sound
-          playCardSound()
-        }
-        break
-
-      case "DRAW_CARDS":
-        if (data.data) {
-          const { player, numCards, drawnCards } = data.data
-
-          console.log(`🎴 ${player} drew ${numCards} cards`)
-
-          // If we have the actual drawn cards, validate and use them
-          if (drawnCards && drawnCards.length > 0) {
-            // Validate all drawn cards to prevent invalid cards
-            const validDrawnCards = drawnCards.filter((card) => {
-              const validColors = ["red", "blue", "green", "yellow", "wild"]
-              const validValues = [
-                "0",
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "skip",
-                "reverse",
-                "draw2",
-                "wild",
-                "wild4",
-              ]
-              return validColors.includes(card.color) && validValues.includes(card.value)
-            })
-
-            if (validDrawnCards.length > 0) {
-              setPlayerHands((prev) => ({
-                ...prev,
-                [player]: [...(prev[player] || []), ...validDrawnCards],
-              }))
-            }
-          } else {
-            // Generate proper random cards from the deck instead of invalid placeholders
-            const validCards = []
-            const currentDeck = [...deck]
-
-            for (let i = 0; i < numCards && currentDeck.length > 0; i++) {
-              const randomIndex = Math.floor(Math.random() * currentDeck.length)
-              validCards.push(currentDeck[randomIndex])
-            }
-
-            if (validCards.length > 0) {
-              setPlayerHands((prev) => ({
-                ...prev,
-                [player]: [...(prev[player] || []), ...validCards],
-              }))
-            }
-          }
-
-          // Update deck count
-          setDeck((prev) => {
-            const newDeck = [...prev]
-            return newDeck.slice(0, Math.max(0, newDeck.length - numCards))
-          })
-
-          // Reset UNO state for player
-          setPlayerSaidUno((prev) => ({
-            ...prev,
-            [player]: false,
-          }))
-
-          setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
-          playDrawSound()
-        }
-        break
-
-      case "PASS_TURN":
-        if (data.data && data.data.currentPlayerIndex !== undefined) {
-          console.log(`⏭️ ${data.playerName} passed their turn`)
-          setCurrentPlayerIndex(data.data.currentPlayerIndex)
-          setGameMessage(`${data.playerName} passed their turn`)
-        }
-        break
-
-      case "UNO_CALL":
-        if (data.data && data.data.player) {
-          console.log(`🔊 ${data.data.player} said UNO!`)
-          setPlayerSaidUno((prev) => ({
-            ...prev,
-            [data.data.player]: true,
-          }))
-          setGameMessage(`${data.data.player} said UNO!`)
-          playUnoSound()
-        }
-        break
-
-      case "WILD_COLOR_SELECT":
-        if (data.data && data.data.card) {
-          const { card, currentPlayerIndex: newPlayerIndex, specialEffect } = data.data
-
-          console.log(`🌈 ${data.playerName} selected color: ${card.color}`)
-
-          // Update the discard pile with the colored wild card
-          setDiscardPile((prev) => {
-            const newPile = [...prev]
-            if (newPile.length > 0) {
-              newPile[newPile.length - 1] = card
-            } else {
-              newPile.push(card)
-            }
-            return newPile
-          })
-
-          // Update current player
-          if (newPlayerIndex !== undefined) {
-            setCurrentPlayerIndex(newPlayerIndex)
-          }
-
-          // Handle special effects
-          if (specialEffect && specialEffect.drawCardCount > 0 && specialEffect.targetPlayer) {
-            setTimeout(() => {
-              drawCards(specialEffect.targetPlayer, specialEffect.drawCardCount)
-            }, 500)
-          }
-
-          setGameMessage(`${data.playerName} changed the color to ${card.color}!`)
-        }
-        break
-
-      case "GAME_STATE_SYNC":
-        if (data.data) {
-          console.log("🔄 Received game state sync")
-          const {
-            deck,
-            playerHands,
-            discardPile,
-            currentPlayerIndex,
-            direction,
-            playerSaidUno,
-            stackedCards,
-            canStack,
-          } = data.data
-
-          // Update all game state at once
-          if (deck) setDeck(deck)
-          if (playerHands) setPlayerHands(playerHands)
-          if (discardPile) setDiscardPile(discardPile)
-          if (currentPlayerIndex !== undefined) setCurrentPlayerIndex(currentPlayerIndex)
-          if (direction) setDirection(direction)
-          if (playerSaidUno) setPlayerSaidUno(playerSaidUno)
-          if (stackedCards) setStackedCards(stackedCards)
-          if (canStack !== undefined) setCanStack(canStack)
-
-          setGameMessage("Game state synchronized")
-        }
-        break
-
-      case "ROUND_WIN":
-        if (data.data && data.data.winner) {
-          const { winner, newScores } = data.data
-          setRoundWinner(winner)
-          if (newScores) setPlayerScores(newScores)
-          setShowEndGameCards(true)
-          setGameMessage(`${winner} wins the round!`)
-          playWinSound()
-        }
-        break
-
-      case "REQUEST_SYNC":
-        if (data.data && data.data.requesterId && isHost()) {
-          console.log("🔄 Received sync request from player:", data.data.requesterId)
-
-          // Host responds with complete game state
-          const gameState = {
-            deck,
-            playerHands,
-            discardPile,
-            currentPlayerIndex,
-            direction,
-            playerSaidUno,
-            stackedCards,
-            canStack,
-          }
-
-          sendGameAction("GAME_STATE_SYNC", gameState)
-        }
-        break
-    }
-
-    setSyncInProgress(false)
-  }
 
   const handleColorSelect = (color) => {
     if (!pendingWildCard) return
@@ -1318,26 +1332,5 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     if (gameMode === "single" && allPlayers[nextPlayerIndex].name !== playerName) {
       setTimeout(runComputerTurns, 1000)
     }
-  }
-
-  const handleStartGameError = (error) => {
-    console.log("❌ Start game error:", error)
-    setGameMessage(`Error: ${error.message}`)
-  }
-
-  // Add listeners
-  socketClient.on("player-joined", handlePlayerJoined)
-  socketClient.on("player-left", handlePlayerLeft)
-  socketClient.on("game-started", handleGameStarted)
-  socketClient.on("game-update", handleGameUpdate)
-  socketClient.on("start-game-error", handleStartGameError)
-
-  // Cleanup listeners on unmount
-  return () => {
-    socketClient.off("player-joined", handlePlayerJoined)
-    socketClient.off("player-left", handlePlayerLeft)
-    socketClient.off("game-started", handleGameStarted)
-    socketClient.off("game-update", handleGameUpdate)
-    socketClient.off("start-game-error", handleStartGameError)
   }
 }
