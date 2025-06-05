@@ -1,6 +1,19 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { ArrowLeft, Users, Play, Volume2, VolumeX, Mic, MicOff, RefreshCw, Settings } from "lucide-react"
+import { PlayerHand } from "./player-hand"
+import { GameBoard } from "./game-board"
+import { OtherPlayerCards } from "./other-player-cards"
+import { CircularGameLayout } from "./circular-game-layout"
+import { ColorSelector } from "./color-selector"
+import { VoiceControl } from "./voice-control"
+import { RoomSharing } from "./room-sharing"
+import { PlayerScoreboard } from "./player-scoreboard"
 import { generateDeck, shuffleDeck, calculatePoints, getComputerMove } from "@/lib/game-utils"
 
 export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, socketClient }) {
@@ -33,6 +46,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   const [canDrawMore, setCanDrawMore] = useState(false)
   const [drawnThisTurn, setDrawnThisTurn] = useState(0)
   const [mustPlayDrawnCard, setMustPlayDrawnCard] = useState(false)
+  const [gameLayout, setGameLayout] = useState("traditional") // "traditional" or "circular"
 
   // Audio context for sound effects
   const audioContextRef = useRef(null)
@@ -836,78 +850,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     sendGameAction("ROUND_WIN", { winner, newScores })
 
     // Check if game is over
-    if (newScores[winner] >= currentRoom.settings?.winningScore) {
+    if (newScores[winner] >= currentRoom.settings?.pointsToWin) {
       setGameWinner(winner)
       setGameMessage(`${winner} wins the entire game!`)
-    }
-  }
-
-  const handleSpecialCard = (card) => {
-    const allPlayers = getAllPlayers()
-    const nextPlayerIndex = getNextPlayerIndex()
-    const nextPlayer = allPlayers[nextPlayerIndex].name
-
-    switch (card.value) {
-      case "skip":
-        setGameMessage(`${playerName} played Skip! ${nextPlayer}'s turn is skipped.`)
-
-        // Skip to the player after the next player
-        const skipIndex = getNextPlayerIndex(nextPlayerIndex)
-        setCurrentPlayerIndex(skipIndex)
-
-        // Send game action
-        sendGameAction("SPECIAL_CARD", { card })
-        sendGameAction("TURN_CHANGE", { currentPlayerIndex: skipIndex })
-
-        if (gameMode === "single" && allPlayers[skipIndex].name !== playerName) {
-          setTimeout(runComputerTurns, 1000)
-        }
-        break
-
-      case "reverse":
-        setDirection((prev) => prev * -1)
-        setGameMessage(`${playerName} played Reverse! Direction changed.`)
-
-        // Move to next player
-        const reverseIndex = getNextPlayerIndex()
-        setCurrentPlayerIndex(reverseIndex)
-
-        // Send game action
-        sendGameAction("SPECIAL_CARD", { card })
-        sendGameAction("TURN_CHANGE", { currentPlayerIndex: reverseIndex })
-
-        if (gameMode === "single" && allPlayers[reverseIndex].name !== playerName) {
-          setTimeout(runComputerTurns, 1000)
-        }
-        break
-
-      case "draw2":
-        drawCards(nextPlayer, 2)
-        setGameMessage(`${playerName} played Draw 2! ${nextPlayer} draws 2 cards and loses a turn!`)
-
-        // Skip to the next player
-        const draw2SkipIndex = getNextPlayerIndex(nextPlayerIndex)
-        setCurrentPlayerIndex(draw2SkipIndex)
-
-        // Send game action
-        sendGameAction("SPECIAL_CARD", { card })
-        sendGameAction("TURN_CHANGE", { currentPlayerIndex: draw2SkipIndex })
-
-        if (gameMode === "single" && allPlayers[draw2SkipIndex].name !== playerName) {
-          setTimeout(runComputerTurns, 1000)
-        }
-        break
-
-      case "wild":
-        setGameMessage(`${playerName} played Wild!`)
-        break
-
-      case "wild4":
-        setGameMessage(`${playerName} played Wild Draw 4!`)
-        break
-
-      default:
-        console.warn("Unknown card value:", card.value)
     }
   }
 
@@ -969,86 +914,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       currentPlayer = allPlayers[nextPlayerIndex]
     }
   }
-
-  // Add a new function to periodically sync game state in multiplayer mode:
-
-  // Add this function after the runComputerTurns function:
-
-  // Periodically sync game state in multiplayer mode
-  const syncGameState = () => {
-    if (socketClient && socketClient.isConnected() && gameMode === "multi" && gameStarted) {
-      // Only the host sends full game state to keep everyone in sync
-      if (isHost()) {
-        console.log("🔄 Host sending periodic game state sync")
-
-        // Prepare complete game state
-        const gameState = {
-          deck,
-          playerHands,
-          discardPile,
-          currentPlayerIndex,
-          direction,
-          playerSaidUno,
-          stackedCards,
-          canStack,
-        }
-
-        // Send complete game state to all players
-        sendGameAction("GAME_STATE_SYNC", gameState)
-      }
-    }
-  }
-
-  // Add this useEffect to set up periodic sync:
-
-  // Add this useEffect after the other useEffect hooks
-  useEffect(() => {
-    // Set up periodic sync for multiplayer games
-    let syncInterval
-
-    if (gameMode === "multi" && gameStarted) {
-      // Sync every 10 seconds to ensure all players have the same state
-      syncInterval = setInterval(syncGameState, 10000)
-    }
-
-    return () => {
-      if (syncInterval) {
-        clearInterval(syncInterval)
-      }
-    }
-  }, [gameMode, gameStarted, isHost, deck, playerHands, discardPile, currentPlayerIndex])
-
-  // Also enhance the requestGameStateSync function to be more robust:
-
-  // Replace the existing requestGameStateSync function with this:
-  const requestGameStateSync = () => {
-    if (socketClient && socketClient.isConnected() && gameMode === "multi") {
-      setSyncInProgress(true)
-      setGameMessage("Requesting game state sync...")
-
-      try {
-        socketClient.gameAction({
-          roomId: currentRoom.id,
-          action: "REQUEST_SYNC",
-          gameData: { requesterId: playerId },
-        })
-
-        // Set a timeout to reset sync status if no response
-        setTimeout(() => {
-          setSyncInProgress(false)
-          setGameMessage("Game state sync complete or timed out")
-        }, 5000)
-      } catch (error) {
-        console.error("Failed to send game action:", error)
-        setSyncInProgress(false)
-      }
-    }
-  }
-
-  // Add a handler for REQUEST_SYNC in the handleGameUpdate function:
-
-  // Add this case in the switch statement in handleGameUpdate:
-  // Add this case in the switch statement in handleGameUpdate:
 
   // Show UNO reminder instead of automatically drawing cards
   const showUnoReminder = () => {
@@ -1258,10 +1123,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     }
   }
 
-  // Replace the handleColorSelect function with this fixed version
-
-  // Replace the handleGameUpdate function in the useEffect
-
   const handleColorSelect = (color) => {
     if (!pendingWildCard) return
 
@@ -1333,4 +1194,242 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setTimeout(runComputerTurns, 1000)
     }
   }
+
+  if (!currentRoom) {
+    return (
+      <div className="w-full max-w-4xl animate-fade-in">
+        <Card>
+          <CardContent className="p-6 text-center">
+            <p>Loading room...</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full max-w-7xl animate-fade-in">
+      {/* Header with room info and controls */}
+      <Card className="mb-4">
+        <CardHeader className="pb-3">
+          <div className="flex justify-between items-start">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                {currentRoom.name}
+                <Badge variant="secondary" className="text-lg font-bold tracking-wider">
+                  {currentRoom.code}
+                </Badge>
+              </CardTitle>
+              <CardDescription>
+                {gameMode === "single" ? "Single Player" : "Multiplayer"} • Points to win:{" "}
+                {currentRoom.settings?.pointsToWin || 500}
+                {currentRoom.settings?.stackingEnabled && " • Stacking enabled"}
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setVoiceEnabled(!voiceEnabled)}
+                className={voiceEnabled ? "bg-green-100" : ""}
+              >
+                {voiceEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className={soundEnabled ? "bg-blue-100" : ""}
+              >
+                {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setGameLayout(gameLayout === "traditional" ? "circular" : "traditional")}
+              >
+                <Settings className="h-4 w-4 mr-1" />
+                {gameLayout === "traditional" ? "Circular" : "Traditional"}
+              </Button>
+              <Button variant="outline" onClick={onLeaveRoom}>
+                <ArrowLeft className="mr-2 h-4 w-4" /> Leave Room
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {/* Players list */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {currentRoom.players.map((player, index) => (
+              <Badge
+                key={index}
+                variant={player.name === playerName ? "default" : "secondary"}
+                className={`${
+                  getCurrentPlayerName() === player.name ? "ring-2 ring-yellow-400 animate-pulse" : ""
+                } ${player.name === playerName ? "bg-green-600" : ""}`}
+              >
+                {player.name === currentRoom.host && "👑 "}
+                {player.name}
+                {playerHands[player.name] && ` (${playerHands[player.name].length})`}
+                {playerSaidUno[player.name] && " 🔊"}
+              </Badge>
+            ))}
+          </div>
+
+          {/* Game status and controls */}
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-muted-foreground">
+              {gameStarted ? (
+                <span className="text-green-600 font-medium">🎮 Game in progress</span>
+              ) : (
+                <span>
+                  {currentRoom.players.length}/{currentRoom.maxPlayers} players
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {!gameStarted && isHost() && canStartGame() && (
+                <Button onClick={startGame} className="bg-green-600 hover:bg-green-700">
+                  <Play className="mr-2 h-4 w-4" />
+                  Start Game
+                </Button>
+              )}
+              {(roundWinner || gameWinner) && isHost() && (
+                <Button onClick={startGame} className="bg-blue-600 hover:bg-blue-700">
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  New Round
+                </Button>
+              )}
+              {gameStarted && playerHands[playerName]?.length === 1 && !playerSaidUno[playerName] && (
+                <Button onClick={handleUnoCall} className="bg-red-600 hover:bg-red-700 animate-bounce">
+                  🔊 UNO!
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Room sharing (only show if not started and is host) */}
+      {!gameStarted && isHost() && gameMode === "multi" && <RoomSharing room={currentRoom} />}
+
+      {/* Game message */}
+      {gameMessage && (
+        <Alert className="mb-4">
+          <AlertDescription className="text-center font-medium">{gameMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Voice command alert */}
+      {voiceCommandAlert && (
+        <Alert className={`mb-4 ${voiceCommandAlert.type === "success" ? "bg-green-100" : "bg-blue-100"}`}>
+          <AlertDescription className="text-center">{voiceCommandAlert.message}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Scoreboard */}
+      {gameStarted && (
+        <PlayerScoreboard
+          players={getAllPlayers()}
+          scores={playerScores}
+          pointsToWin={currentRoom.settings?.pointsToWin || 500}
+        />
+      )}
+
+      {/* Game area */}
+      {gameStarted && (
+        <div className="space-y-4">
+          {gameLayout === "circular" ? (
+            <CircularGameLayout
+              players={getAllPlayers()}
+              playerHands={playerHands}
+              playerName={playerName}
+              currentPlayer={getCurrentPlayerName()}
+              playerSaidUno={playerSaidUno}
+              showEndGameCards={showEndGameCards}
+              topCard={getTopCard()}
+              deckCount={deck.length}
+              onDrawCard={handleDrawCard}
+              animatingCard={animatingCard}
+              drawAnimation={drawAnimation}
+              stackedCards={stackedCards}
+            />
+          ) : (
+            <>
+              {/* Other players */}
+              <OtherPlayerCards
+                playerHands={playerHands}
+                playerName={playerName}
+                playerSaidUno={playerSaidUno}
+                currentPlayer={getCurrentPlayerName()}
+                showEndGameCards={showEndGameCards}
+                players={getAllPlayers()}
+              />
+
+              {/* Game board */}
+              <GameBoard
+                topCard={getTopCard()}
+                deckCount={deck.length}
+                onDrawCard={handleDrawCard}
+                currentPlayer={getCurrentPlayerName()}
+                currentPlayerName={playerName}
+                animatingCard={animatingCard}
+                drawAnimation={drawAnimation}
+                stackedCards={stackedCards}
+              />
+            </>
+          )}
+
+          {/* Player's hand */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-center">Your Hand ({playerHands[playerName]?.length || 0} cards)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PlayerHand
+                cards={playerHands[playerName] || []}
+                onPlayCard={playCard}
+                canPlay={getCurrentPlayerName() === playerName}
+                canStack={canStack}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Color selector modal */}
+      {showColorSelector && <ColorSelector onSelectColor={handleColorSelect} />}
+
+      {/* Voice control */}
+      {voiceEnabled && <VoiceControl onCommand={handleVoiceCommand} onVoiceDetected={setVoiceDetected} />}
+
+      {/* Round/Game winner */}
+      {(roundWinner || gameWinner) && (
+        <Card className="mt-4 bg-gradient-to-r from-yellow-100 to-orange-100">
+          <CardContent className="p-6 text-center">
+            <h2 className="text-2xl font-bold mb-2">
+              🎉 {gameWinner ? "Game Winner" : "Round Winner"}: {roundWinner || gameWinner}!
+            </h2>
+            {gameWinner && (
+              <p className="text-lg mb-4">
+                Final Score: {playerScores[gameWinner]} / {currentRoom.settings?.pointsToWin || 500}
+              </p>
+            )}
+            {roundWinner && !gameWinner && (
+              <p className="text-lg mb-4">
+                Score: {playerScores[roundWinner]} / {currentRoom.settings?.pointsToWin || 500}
+              </p>
+            )}
+            {isHost() && (
+              <Button onClick={startGame} className="bg-blue-600 hover:bg-blue-700">
+                <RefreshCw className="mr-2 h-4 w-4" />
+                {gameWinner ? "New Game" : "Next Round"}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
 }
