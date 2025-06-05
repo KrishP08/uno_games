@@ -43,10 +43,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   const [pendingWildCard, setPendingWildCard] = useState(null)
   const [syncInProgress, setSyncInProgress] = useState(false)
   const [unoReminderShown, setUnoReminderShown] = useState(false)
-  const [canDrawMore, setCanDrawMore] = useState(false)
   const [drawnThisTurn, setDrawnThisTurn] = useState(0)
   const [mustPlayDrawnCard, setMustPlayDrawnCard] = useState(false)
   const [gameLayout, setGameLayout] = useState("traditional") // "traditional" or "circular"
+  const [isDrawingCards, setIsDrawingCards] = useState(false)
 
   // Audio context for sound effects
   const audioContextRef = useRef(null)
@@ -152,7 +152,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setPlayerSaidUno(playerSaidUno || {})
               setStackedCards([])
               setCanStack(false)
-              setCanDrawMore(false)
               setDrawnThisTurn(0)
               setMustPlayDrawnCard(false)
             }
@@ -208,7 +207,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               }
 
               // Reset draw state for all players when a card is played
-              setCanDrawMore(false)
               setDrawnThisTurn(0)
               setMustPlayDrawnCard(false)
 
@@ -313,6 +311,16 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
               setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
               playDrawSound()
+            }
+            break
+
+          case "TURN_CHANGE":
+            if (data.data && data.data.currentPlayerIndex !== undefined) {
+              console.log(`🔄 Turn changed to player index: ${data.data.currentPlayerIndex}`)
+              setCurrentPlayerIndex(data.data.currentPlayerIndex)
+              setDrawnThisTurn(0)
+              setMustPlayDrawnCard(false)
+              setIsDrawingCards(false)
             }
             break
 
@@ -517,7 +525,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     gameMode,
     gameStarted,
     socketClient,
-    isHost,
     deck,
     playerHands,
     discardPile,
@@ -741,6 +748,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       [player]: false,
     }))
 
+    // Update drawn count
+    setDrawnThisTurn(drawnThisTurn + numCards)
+
     // Set game message
     setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
     playDrawSound()
@@ -748,28 +758,83 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     // Send game action
     sendGameAction("DRAW_CARDS", { player, numCards, drawnCards })
 
-    // If player drew a card on their turn, set the state to allow playing it
-    if (player === playerName && !currentRoom.settings?.unlimitedDrawEnabled) {
-      setDrawnThisTurn(1)
-      setMustPlayDrawnCard(true)
+    // Check if we need to continue drawing (Force to Draw rule)
+    if (currentRoom.settings?.forceDrawEnabled && player === playerName) {
+      const topCard = getTopCard()
+      const hasPlayableCard = drawnCards.some(
+        (card) => card.color === topCard.color || card.value === topCard.value || card.color === "wild",
+      )
+
+      if (!hasPlayableCard) {
+        // Continue drawing until we get a playable card
+        setTimeout(() => {
+          drawCards(player, 1)
+        }, 1000)
+        return
+      } else {
+        setGameMessage(`${player} drew until getting a playable card!`)
+      }
     }
 
-    // Run computer turns in single player mode
-    if (gameMode === "single" && allPlayers[currentPlayerIndex].name !== playerName) {
-      setTimeout(runComputerTurns, 1000)
+    // Check if turn should pass (only if not Force to Draw or if we got a playable card)
+    if (
+      !currentRoom.settings?.forceDrawEnabled ||
+      (currentRoom.settings?.forceDrawEnabled &&
+        drawnCards.some((card) => {
+          const topCard = getTopCard()
+          return card.color === topCard.color || card.value === topCard.value || card.color === "wild"
+        }))
+    ) {
+      // If Force Play is enabled, check if player must play a card
+      if (currentRoom.settings?.forcePlayEnabled && player === playerName) {
+        const topCard = getTopCard()
+        const playerHand = [...(playerHands[player] || []), ...drawnCards]
+        const playableCards = playerHand.filter(
+          (card) => card.color === topCard.color || card.value === topCard.value || card.color === "wild",
+        )
+
+        if (playableCards.length > 0) {
+          setGameMessage(`${player} must play a card!`)
+          setMustPlayDrawnCard(true)
+          return // Don't pass turn, player must play
+        }
+      }
+
+      // Pass turn to next player
+      setTimeout(() => {
+        const nextPlayerIndex = getNextPlayerIndex()
+        setCurrentPlayerIndex(nextPlayerIndex)
+        setDrawnThisTurn(0)
+        setMustPlayDrawnCard(false)
+        setIsDrawingCards(false)
+
+        sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
+
+        // Run computer turns in single player mode
+        if (gameMode === "single" && allPlayers[nextPlayerIndex].name !== playerName) {
+          setTimeout(runComputerTurns, 1000)
+        }
+      }, 1000)
     }
   }
 
   const handleDrawCard = () => {
-    if (!gameStarted) return
+    if (!gameStarted || isDrawingCards) return
 
     const allPlayers = getAllPlayers()
     const currentPlayer = allPlayers[currentPlayerIndex].name
 
     if (currentPlayer !== playerName) return
 
-    // Check if player can draw more cards based on the unlimited draw rule
+    setIsDrawingCards(true)
+
+    // Check draw rules
     if (currentRoom.settings?.unlimitedDrawEnabled) {
+      // Unlimited draw - player can draw as many cards as they want
+      drawCards(playerName, 1)
+      setIsDrawingCards(false)
+    } else if (currentRoom.settings?.forceDrawEnabled) {
+      // Force to draw - draw until you get a playable card
       drawCards(playerName, 1)
     } else {
       // Traditional UNO rules - only draw one card per turn
@@ -777,6 +842,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         drawCards(playerName, 1)
       } else {
         setGameMessage("You can only draw one card per turn.")
+        setIsDrawingCards(false)
       }
     }
   }
@@ -851,9 +917,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setCanStack(false)
     setShowEndGameCards(false)
     setUnoReminderShown(false)
-    setCanDrawMore(false)
     setDrawnThisTurn(0)
     setMustPlayDrawnCard(false)
+    setIsDrawingCards(false)
 
     // Notify other players via Socket.IO
     if (socketClient && socketClient.isConnected() && gameMode === "multi") {
@@ -1065,9 +1131,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setAnimatingCard({ ...card, playerName })
 
       // Reset draw state when playing a card
-      setCanDrawMore(false)
       setDrawnThisTurn(0)
       setMustPlayDrawnCard(false)
+      setIsDrawingCards(false)
 
       // Remove card from player's hand IMMEDIATELY
       const newHand = [...playerHands[playerName]]
@@ -1302,7 +1368,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               <CardDescription>
                 {gameMode === "single" ? "Single Player" : "Multiplayer"} • Points to win:{" "}
                 {currentRoom.settings?.pointsToWin || 500}
-                {currentRoom.settings?.stackingEnabled && " • Stacking enabled"}
+                {currentRoom.settings?.stackingEnabled && " • 📚 Stacking"}
+                {currentRoom.settings?.forceDrawEnabled && " • 🎯 Force Draw"}
+                {currentRoom.settings?.unlimitedDrawEnabled && " • ♾️ Unlimited"}
+                {currentRoom.settings?.forcePlayEnabled && " • 🎮 Force Play"}
+                {currentRoom.settings?.jumpInEnabled && " • ⚡ Jump-In"}
               </CardDescription>
             </div>
             <div className="flex gap-2">
@@ -1468,7 +1538,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               <PlayerHand
                 cards={playerHands[playerName] || []}
                 onPlayCard={playCard}
-                canPlay={getCurrentPlayerName() === playerName}
+                canPlay={getCurrentPlayerName() === playerName && !isDrawingCards}
                 canStack={canStack}
               />
             </CardContent>

@@ -28,7 +28,8 @@ export function Lobby({
   const [pointsToWin, setPointsToWin] = useState(500)
   const [customPoints, setCustomPoints] = useState("500")
   const [stackingEnabled, setStackingEnabled] = useState(true)
-  const [unlimitedDrawEnabled, setUnlimitedDrawEnabled] = useState(true)
+  const [forceDrawEnabled, setForceDrawEnabled] = useState(false)
+  const [unlimitedDrawEnabled, setUnlimitedDrawEnabled] = useState(false)
   const [forcePlayEnabled, setForcePlayEnabled] = useState(true)
   const [jumpInEnabled, setJumpInEnabled] = useState(false)
   const [activeTab, setActiveTab] = useState("instant")
@@ -56,6 +57,7 @@ export function Lobby({
     // Create comprehensive game rules object
     const gameRules = {
       stackingEnabled,
+      forceDrawEnabled,
       unlimitedDrawEnabled,
       forcePlayEnabled,
       jumpInEnabled,
@@ -84,6 +86,7 @@ export function Lobby({
       // Create comprehensive game rules object for single player
       const gameRules = {
         stackingEnabled,
+        forceDrawEnabled,
         unlimitedDrawEnabled,
         forcePlayEnabled,
         jumpInEnabled,
@@ -212,10 +215,22 @@ export function Lobby({
 
                     <div className="flex items-center justify-between">
                       <div>
+                        <Label htmlFor="forceDraw" className="font-medium">
+                          Force to Draw
+                        </Label>
+                        <p className="text-sm text-muted-foreground">Must draw until you get a playable card</p>
+                      </div>
+                      <Switch id="forceDraw" checked={forceDrawEnabled} onCheckedChange={setForceDrawEnabled} />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
                         <Label htmlFor="unlimitedDraw" className="font-medium">
                           Unlimited Draw
                         </Label>
-                        <p className="text-sm text-muted-foreground">Draw until you get a playable card</p>
+                        <p className="text-sm text-muted-foreground">
+                          Remove draw limit - draw as many cards as you want
+                        </p>
                       </div>
                       <Switch
                         id="unlimitedDraw"
@@ -364,6 +379,8 @@ export function Lobby({
                               👥 Players: {room.players.length}/{room.maxPlayers} • 🎯 Points:{" "}
                               {room.settings?.pointsToWin || 500}
                               {room.settings?.stackingEnabled && " • 📚 Stacking"}
+                              {room.settings?.forceDrawEnabled && " • 🎯 Force Draw"}
+                              {room.settings?.unlimitedDrawEnabled && " • ♾️ Unlimited"}
                               {room.gameStarted && " • 🎮 In Progress"}
                             </p>
                             {room.players.length > 0 && (
@@ -453,10 +470,26 @@ export function Lobby({
 
                         <div className="flex items-center justify-between">
                           <div>
+                            <Label htmlFor="forceDrawMulti" className="font-medium">
+                              Force to Draw
+                            </Label>
+                            <p className="text-sm text-muted-foreground">Must draw until you get a playable card</p>
+                          </div>
+                          <Switch
+                            id="forceDrawMulti"
+                            checked={forceDrawEnabled}
+                            onCheckedChange={setForceDrawEnabled}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div>
                             <Label htmlFor="unlimitedDrawMulti" className="font-medium">
                               Unlimited Draw
                             </Label>
-                            <p className="text-sm text-muted-foreground">Draw until you get a playable card</p>
+                            <p className="text-sm text-muted-foreground">
+                              Remove draw limit - draw as many cards as you want
+                            </p>
                           </div>
                           <Switch
                             id="unlimitedDrawMulti"
