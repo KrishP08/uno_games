@@ -247,57 +247,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
           case "DRAW_CARDS":
             if (data.data && data.playerId !== playerId) {
-              // Only process if not from current player
               const { player, numCards, drawnCards } = data.data
-
               console.log(`🎴 ${player} drew ${numCards} cards`)
 
-              // Update the player's hand with drawn cards
-              if (drawnCards && drawnCards.length > 0) {
-                const validDrawnCards = drawnCards.filter((card) => {
-                  const validColors = ["red", "blue", "green", "yellow", "wild"]
-                  const validValues = [
-                    "0",
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "5",
-                    "6",
-                    "7",
-                    "8",
-                    "9",
-                    "skip",
-                    "reverse",
-                    "draw2",
-                    "wild",
-                    "wild4",
-                  ]
-                  return validColors.includes(card.color) && validValues.includes(card.value)
-                })
-
-                if (validDrawnCards.length > 0) {
-                  setPlayerHands((prev) => ({
-                    ...prev,
-                    [player]: [...(prev[player] || []), ...validDrawnCards],
-                  }))
-                }
-              }
-
-              // Update deck count
-              setDeck((prev) => {
-                const newDeck = [...prev]
-                return newDeck.slice(0, Math.max(0, newDeck.length - numCards))
-              })
-
-              // Reset UNO state for player
-              setPlayerSaidUno((prev) => ({
-                ...prev,
-                [player]: false,
-              }))
-
-              setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
-              playDrawSound()
+              // Use the exact cards from the server
+              drawCards(player, numCards, drawnCards)
             }
             break
 
@@ -427,6 +381,17 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               }
 
               sendGameAction("GAME_STATE_SYNC", gameState)
+            }
+            break
+
+          case "UNO_CHALLENGE":
+            if (data.data) {
+              const { challenger, target } = data.data
+              if (target === playerName) {
+                // I was challenged, draw 2 cards
+                drawCards(playerName, 2)
+              }
+              setGameMessage(`${challenger} challenged ${target} for not saying UNO!`)
             }
             break
 
@@ -689,44 +654,50 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     }
   }
 
-  const drawCards = (player, numCards) => {
+  const drawCards = (player, numCards, forcedCards = null) => {
     if (!gameStarted) return
 
-    const allPlayers = getAllPlayers()
-    const currentPlayer = allPlayers[currentPlayerIndex].name
-
-    // Prevent multiple simultaneous draw operations
-    if (isDrawingCards && player === playerName) return
+    // Prevent multiple simultaneous draw operations for the same player
+    if (isDrawingCards && player === playerName) {
+      console.log("Already drawing cards, ignoring duplicate request")
+      return
+    }
 
     if (player === playerName) {
       setIsDrawingCards(true)
     }
 
-    // Draw cards from the deck
-    const drawnCards = []
+    // Use provided cards or draw from deck
+    let drawnCards = []
     const updatedDeck = [...deck]
 
-    for (let i = 0; i < numCards; i++) {
-      if (updatedDeck.length > 0) {
-        drawnCards.push(updatedDeck.pop())
-      } else {
-        // Handle reshuffling the discard pile into the deck if empty
-        if (discardPile.length > 1) {
-          const topCard = discardPile.pop() // Keep the top card
-          updatedDeck.push(...discardPile) // Add discard pile to deck
-          setDiscardPile([topCard]) // Reset discard pile with the top card
-          shuffleDeck(updatedDeck) // Shuffle the deck
-          if (updatedDeck.length > 0) {
-            drawnCards.push(updatedDeck.pop())
-          }
+    if (forcedCards && Array.isArray(forcedCards)) {
+      // Use the provided cards (from server sync)
+      drawnCards = forcedCards
+    } else {
+      // Draw cards from the deck
+      for (let i = 0; i < numCards; i++) {
+        if (updatedDeck.length > 0) {
+          drawnCards.push(updatedDeck.pop())
         } else {
-          setGameMessage("No more cards in the deck or discard pile!")
-          break
+          // Handle reshuffling
+          if (discardPile.length > 1) {
+            const topCard = discardPile[discardPile.length - 1]
+            const cardsToShuffle = discardPile.slice(0, -1)
+            updatedDeck.push(...shuffleDeck(cardsToShuffle))
+            setDiscardPile([topCard])
+            if (updatedDeck.length > 0) {
+              drawnCards.push(updatedDeck.pop())
+            }
+          } else {
+            setGameMessage("No more cards available!")
+            break
+          }
         }
       }
     }
 
-    // Update player's hand ONLY ONCE
+    // Update player's hand - ensure no duplicates
     setPlayerHands((prev) => {
       const currentHand = prev[player] || []
       return {
@@ -735,88 +706,32 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       }
     })
 
-    // Update deck
-    setDeck(updatedDeck)
+    // Update deck only if we actually drew from it
+    if (!forcedCards) {
+      setDeck(updatedDeck)
+    }
 
-    // Reset UNO state for player
+    // Reset UNO state for player who drew cards
     setPlayerSaidUno((prev) => ({
       ...prev,
       [player]: false,
     }))
 
-    // Set game message
-    setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
-    playDrawSound()
-
-    // Send game action ONLY ONCE
-    sendGameAction("DRAW_CARDS", { player, numCards, drawnCards })
-
-    // Reset drawing state
-    if (player === playerName) {
-      setIsDrawingCards(false)
+    // Only send game action if this is the current player's action
+    if (player === playerName && !forcedCards) {
+      sendGameAction("DRAW_CARDS", {
+        player,
+        numCards: drawnCards.length,
+        drawnCards,
+      })
     }
 
-    // Only handle turn passing for the current player's voluntary draw
-    if (player === currentPlayer && player === playerName) {
-      setDrawnThisTurn(drawnThisTurn + numCards)
+    setGameMessage(`${player} drew ${drawnCards.length} card${drawnCards.length > 1 ? "s" : ""}`)
+    playDrawSound()
 
-      // Check if we need to continue drawing (Force to Draw rule)
-      if (currentRoom.settings?.forceDrawEnabled) {
-        const topCard = getTopCard()
-        const hasPlayableCard = drawnCards.some(
-          (card) => card.color === topCard.color || card.value === topCard.value || card.color === "wild",
-        )
-
-        if (!hasPlayableCard) {
-          // Continue drawing until we get a playable card
-          setTimeout(() => {
-            drawCards(player, 1)
-          }, 1000)
-          return
-        } else {
-          setGameMessage(`${player} drew until getting a playable card!`)
-        }
-      }
-
-      // Check if turn should pass
-      if (
-        !currentRoom.settings?.forceDrawEnabled ||
-        (currentRoom.settings?.forceDrawEnabled &&
-          drawnCards.some((card) => {
-            const topCard = getTopCard()
-            return card.color === topCard.color || card.value === topCard.value || card.color === "wild"
-          }))
-      ) {
-        // If Force Play is enabled, check if player must play a card
-        if (currentRoom.settings?.forcePlayEnabled) {
-          const topCard = getTopCard()
-          const playerHand = [...(playerHands[player] || []), ...drawnCards]
-          const playableCards = playerHand.filter(
-            (card) => card.color === topCard.color || card.value === topCard.value || card.color === "wild",
-          )
-
-          if (playableCards.length > 0) {
-            setGameMessage(`${player} must play a card!`)
-            setMustPlayDrawnCard(true)
-            return // Don't pass turn, player must play
-          }
-        }
-
-        // Pass turn to next player
-        setTimeout(() => {
-          const nextPlayerIndex = getNextPlayerIndex()
-          setCurrentPlayerIndex(nextPlayerIndex)
-          setDrawnThisTurn(0)
-          setMustPlayDrawnCard(false)
-
-          sendGameAction("TURN_CHANGE", { currentPlayerIndex: nextPlayerIndex })
-
-          // Run computer turns in single player mode
-          if (gameMode === "single" && allPlayers[nextPlayerIndex].name !== playerName) {
-            setTimeout(runComputerTurns, 1000)
-          }
-        }, 1000)
-      }
+    if (player === playerName) {
+      setIsDrawingCards(false)
+      setDrawnThisTurn(drawnThisTurn + drawnCards.length)
     }
   }
 
@@ -828,13 +743,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     if (currentPlayer !== playerName) return
 
-    setIsDrawingCards(true)
-
-    // Check draw rules
+    // Check unlimited draw setting
     if (currentRoom.settings?.unlimitedDrawEnabled) {
       // Unlimited draw - player can draw as many cards as they want
       drawCards(playerName, 1)
-      setIsDrawingCards(false)
     } else if (currentRoom.settings?.forceDrawEnabled) {
       // Force to draw - draw until you get a playable card
       drawCards(playerName, 1)
@@ -844,7 +756,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         drawCards(playerName, 1)
       } else {
         setGameMessage("You can only draw one card per turn.")
-        setIsDrawingCards(false)
       }
     }
   }
@@ -1203,13 +1114,13 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
             if (!newCanStack) {
               // Calculate total cards to draw from stack
-              drawCardCount = newStackedCards.reduce((total, c) => total + (c.value === "draw2" ? 2 : 4), 0)
+              drawCardCount = newStackedCards.length * 2 // Each draw2 = 2 cards
               newStackedCards = []
               skipTurn = true
               nextPlayerIndex = getNextPlayerIndex(nextPlayerIndex)
             }
           } else {
-            drawCardCount = 2
+            drawCardCount = 2 // Exactly 2 cards
             skipTurn = true
             nextPlayerIndex = getNextPlayerIndex(nextPlayerIndex)
           }
@@ -1352,6 +1263,26 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     }
   }
 
+  // Add this new function after handleUnoCall
+  const handleUnoChallenge = (targetPlayer) => {
+    if (!gameStarted) return
+
+    const targetHand = playerHands[targetPlayer] || []
+
+    if (targetHand.length === 1 && !playerSaidUno[targetPlayer]) {
+      // Valid challenge - target player draws 2 cards
+      drawCards(targetPlayer, 2)
+      setGameMessage(`${playerName} caught ${targetPlayer}! ${targetPlayer} draws 2 cards for not saying UNO!`)
+
+      sendGameAction("UNO_CHALLENGE", {
+        challenger: playerName,
+        target: targetPlayer,
+      })
+    } else {
+      setGameMessage(`Invalid challenge! ${targetPlayer} either said UNO or doesn't have 1 card.`)
+    }
+  }
+
   if (!currentRoom) {
     return (
       <div className="w-full max-w-4xl animate-fade-in">
@@ -1420,22 +1351,53 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           </div>
         </CardHeader>
         <CardContent className="pt-0">
-          {/* Players list */}
+          {/* Players list with UNO challenge buttons */}
           <div className="flex flex-wrap gap-2 mb-3">
-            {currentRoom.players.map((player, index) => (
-              <Badge
-                key={index}
-                variant={player.name === playerName ? "default" : "secondary"}
-                className={`${
-                  getCurrentPlayerName() === player.name ? "ring-2 ring-yellow-400 animate-pulse" : ""
-                } ${player.name === playerName ? "bg-green-600" : ""}`}
-              >
-                {player.name === currentRoom.host && "👑 "}
-                {player.name}
-                {playerHands[player.name] && ` (${playerHands[player.name].length})`}
-                {playerSaidUno[player.name] && " 🔊"}
-              </Badge>
-            ))}
+            {getAllPlayers().map((player, index) => {
+              const isCurrentTurn = getCurrentPlayerName() === player.name
+              const hasOneCard = playerHands[player.name]?.length === 1
+              const saidUno = playerSaidUno[player.name]
+              const canChallenge = hasOneCard && !saidUno && player.name !== playerName && gameStarted
+
+              return (
+                <div key={index} className="flex items-center gap-1">
+                  <Badge
+                    variant={player.name === playerName ? "default" : "secondary"}
+                    className={`${
+                      isCurrentTurn ? "ring-2 ring-yellow-400 animate-pulse" : ""
+                    } ${player.name === playerName ? "bg-green-600" : ""}`}
+                  >
+                    {player.name === currentRoom.host && "👑 "}
+                    {player.name}
+                    {playerHands[player.name] && ` (${playerHands[player.name].length})`}
+                    {saidUno && " 🔊"}
+                  </Badge>
+
+                  {/* UNO Challenge button */}
+                  {canChallenge && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleUnoChallenge(player.name)}
+                      className="text-xs px-2 py-1 h-6"
+                    >
+                      Challenge!
+                    </Button>
+                  )}
+
+                  {/* UNO button for current player */}
+                  {player.name === playerName && hasOneCard && !saidUno && gameStarted && (
+                    <Button
+                      size="sm"
+                      onClick={handleUnoCall}
+                      className="bg-red-600 hover:bg-red-700 animate-bounce text-xs px-2 py-1 h-6"
+                    >
+                      🔊 UNO!
+                    </Button>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
           {/* Game status and controls */}
@@ -1460,11 +1422,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 <Button onClick={startGame} className="bg-blue-600 hover:bg-blue-700">
                   <RefreshCw className="mr-2 h-4 w-4" />
                   New Round
-                </Button>
-              )}
-              {gameStarted && playerHands[playerName]?.length === 1 && !playerSaidUno[playerName] && (
-                <Button onClick={handleUnoCall} className="bg-red-600 hover:bg-red-700 animate-bounce">
-                  🔊 UNO!
                 </Button>
               )}
             </div>
