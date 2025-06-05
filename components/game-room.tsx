@@ -17,6 +17,7 @@ import { PlayerScoreboard } from "./player-scoreboard"
 import { generateDeck, shuffleDeck, calculatePoints, getComputerMove } from "@/lib/game-utils"
 
 export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, socketClient }) {
+  const [processedActions] = useState(new Set())
   const [currentRoom, setCurrentRoom] = useState(room)
   const [deck, setDeck] = useState([])
   const [discardPile, setDiscardPile] = useState([])
@@ -220,28 +221,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setGameMessage(message)
               playCardSound()
 
-              // Handle special effects for other players
-              if (specialEffect && specialEffect.drawCardCount > 0 && specialEffect.targetPlayer) {
-                setTimeout(() => {
-                  setPlayerHands((prev) => {
-                    const targetHand = prev[specialEffect.targetPlayer] || []
-                    const newCards = []
-
-                    // Generate valid cards for the target player
-                    for (let i = 0; i < specialEffect.drawCardCount; i++) {
-                      newCards.push({
-                        color: ["red", "blue", "green", "yellow"][Math.floor(Math.random() * 4)],
-                        value: Math.floor(Math.random() * 10).toString(),
-                      })
-                    }
-
-                    return {
-                      ...prev,
-                      [specialEffect.targetPlayer]: [...targetHand, ...newCards],
-                    }
-                  })
-                }, 500)
-              }
+              // REMOVED: Don't handle special effects here as they're handled by the card player
+              // This prevents duplicate card draws
             }
             break
 
@@ -249,6 +230,22 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             if (data.data && data.playerId !== playerId) {
               const { player, numCards, drawnCards } = data.data
               console.log(`🎴 ${player} drew ${numCards} cards`)
+
+              // Prevent duplicate processing by checking if we already processed this action
+              if (data.actionId && processedActions.has(data.actionId)) {
+                console.log("Ignoring duplicate DRAW_CARDS action")
+                return
+              }
+
+              // Mark this action as processed
+              if (data.actionId) {
+                processedActions.add(data.actionId)
+                // Keep only last 100 action IDs to prevent memory leak
+                if (processedActions.size > 100) {
+                  const firstAction = processedActions.values().next().value
+                  processedActions.delete(firstAction)
+                }
+              }
 
               // Use the exact cards from the server
               drawCards(player, numCards, drawnCards)
@@ -436,6 +433,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     playerSaidUno,
     stackedCards,
     canStack,
+    processedActions,
   ])
 
   // Periodic game state synchronization for multiplayer
@@ -638,17 +636,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
       console.log(`📤 Sending ${action} to server:`, actionPayload)
       socketClient.gameAction(actionPayload)
-
-      // Log current state for debugging
-      console.log(`📊 Current game state after ${action}:`, {
-        currentPlayerIndex,
-        currentPlayer: getCurrentPlayerName(),
-        discardPileTop: getTopCard(),
-        playerHandSizes: Object.keys(playerHands).reduce((acc, name) => {
-          acc[name] = playerHands[name]?.length || 0
-          return acc
-        }, {}),
-      })
     } else {
       console.log(`Local action: ${action}`, data)
     }
@@ -663,6 +650,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       return
     }
 
+    // Create a unique key for this draw operation
+    const drawKey = `${player}-${numCards}-${Date.now()}`
+
     if (player === playerName) {
       setIsDrawingCards(true)
     }
@@ -673,7 +663,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     if (forcedCards && Array.isArray(forcedCards)) {
       // Use the provided cards (from server sync)
-      drawnCards = forcedCards
+      drawnCards = forcedCards.slice(0, numCards) // Ensure we don't get more than requested
     } else {
       // Draw cards from the deck
       for (let i = 0; i < numCards; i++) {
@@ -717,7 +707,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       [player]: false,
     }))
 
-    // Only send game action if this is the current player's action
+    // Only send game action if this is the current player's action and not from server
     if (player === playerName && !forcedCards) {
       sendGameAction("DRAW_CARDS", {
         player,
@@ -1113,7 +1103,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             newCanStack = nextPlayerHand.some((c) => c.value === "draw2")
 
             if (!newCanStack) {
-              // Calculate total cards to draw from stack
+              // Calculate total cards to draw from stack - FIXED
               drawCardCount = newStackedCards.length * 2 // Each draw2 = 2 cards
               newStackedCards = []
               skipTurn = true
