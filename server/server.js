@@ -263,7 +263,7 @@ io.on("connection", (socket) => {
 
   // Handle game actions (card plays, draws, etc.)
   socket.on("game-action", (data) => {
-    const { roomId, action, gameData, actionId } = data
+    const { roomId, action, gameData } = data
     const room = gameRooms[roomId]
 
     if (!room) {
@@ -272,9 +272,9 @@ io.on("connection", (socket) => {
     }
 
     // Check for duplicate actions (prevents double processing)
-    if (actionId && isDuplicateAction(roomId, actionId)) {
-      console.log(`⚠️ Duplicate action detected, ignoring: ${action} (${actionId})`)
-      socket.emit("action-confirmed", { action, actionId })
+    if (data.actionId && isDuplicateAction(roomId, data.actionId)) {
+      console.log(`⚠️ Duplicate action detected, ignoring: ${action} (${data.actionId})`)
+      socket.emit("action-confirmed", { action, actionId: data.actionId })
       return
     }
 
@@ -285,27 +285,26 @@ io.on("connection", (socket) => {
     room.lastActivity = Date.now()
 
     // Update room game state if provided
-    if (gameData) {
-      room.gameState = { ...room.gameState, ...gameData }
+    if (data.data) {
+      room.gameState = { ...room.gameState, ...data.data }
     }
 
-    // Broadcast game action to ALL players in room INCLUDING sender
-    // This ensures consistent state across all clients
+    // Create the game update with complete data
     const gameUpdate = {
       action,
-      data: gameData,
+      data: data.data, // Send the complete data payload
       playerId: playerSockets[socket.id]?.playerId,
       playerName: playerSockets[socket.id]?.playerName,
       timestamp: Date.now(),
       actionId: loggedActionId,
     }
 
-    console.log(`📡 Broadcasting to room ${roomId}:`, action)
+    console.log(`📡 Broadcasting ${action} to room ${roomId}:`, gameUpdate)
 
-    // Send to all players in the room
+    // Send to ALL players in the room INCLUDING sender for confirmation
     io.to(roomId).emit("game-update", gameUpdate)
 
-    // Also send confirmation back to sender
+    // Send confirmation back to sender
     socket.emit("action-confirmed", { action, actionId: loggedActionId })
   })
 

@@ -175,27 +175,26 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
               console.log(`🃏 ${data.playerName} played ${card.color} ${card.value}`)
 
-              // Update the specific player's hand
-              if (playerHand && data.playerName) {
-                setPlayerHands((prev) => ({
-                  ...prev,
-                  [data.playerName]: playerHand,
-                }))
-              }
+              // IMMEDIATELY update the player's hand
+              setPlayerHands((prev) => ({
+                ...prev,
+                [data.playerName]: playerHand || [],
+              }))
 
-              // Update discard pile completely
+              // IMMEDIATELY update discard pile
               if (updatedDiscardPile && updatedDiscardPile.length > 0) {
                 setDiscardPile(updatedDiscardPile)
               } else {
                 setDiscardPile((prev) => [...prev, card])
               }
 
-              // Update turn system
+              // IMMEDIATELY update current player index
               if (newPlayerIndex !== undefined) {
                 setCurrentPlayerIndex(newPlayerIndex)
+                console.log(`🔄 Turn changed to player index: ${newPlayerIndex}`)
               }
 
-              // Update direction if changed
+              // IMMEDIATELY update direction if changed
               if (newDirection !== undefined) {
                 setDirection(newDirection)
               }
@@ -213,41 +212,38 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setDrawnThisTurn(0)
               setMustPlayDrawnCard(false)
 
-              // Handle special effects
-              if (specialEffect) {
-                if (specialEffect.drawCardCount > 0 && specialEffect.targetPlayer) {
-                  setTimeout(() => {
-                    // Update the target player's hand
-                    setPlayerHands((prev) => {
-                      const targetHand = prev[specialEffect.targetPlayer] || []
-                      const newCards = []
-
-                      // Generate valid cards for the target player
-                      for (let i = 0; i < specialEffect.drawCardCount; i++) {
-                        newCards.push({
-                          color: ["red", "blue", "green", "yellow"][Math.floor(Math.random() * 4)],
-                          value: Math.floor(Math.random() * 10).toString(),
-                        })
-                      }
-
-                      return {
-                        ...prev,
-                        [specialEffect.targetPlayer]: [...targetHand, ...newCards],
-                      }
-                    })
-                  }, 500)
-                }
-              }
-
               // Set game message
               let message = `${data.playerName} played ${card.color} ${card.value}`
-              if (specialEffect?.skipTurn) message += ` - ${specialEffect.targetPlayer}'s turn is skipped!`
+              if (specialEffect?.skipTurn) message += ` - Turn skipped!`
               if (newDirection !== direction) message += " - Direction reversed!"
               if (specialEffect?.drawCardCount > 0)
                 message += ` - ${specialEffect.targetPlayer} draws ${specialEffect.drawCardCount} cards!`
 
               setGameMessage(message)
               playCardSound()
+
+              // Handle special effects for other players
+              if (specialEffect && specialEffect.drawCardCount > 0 && specialEffect.targetPlayer) {
+                setTimeout(() => {
+                  setPlayerHands((prev) => {
+                    const targetHand = prev[specialEffect.targetPlayer] || []
+                    const newCards = []
+
+                    // Generate valid cards for the target player
+                    for (let i = 0; i < specialEffect.drawCardCount; i++) {
+                      newCards.push({
+                        color: ["red", "blue", "green", "yellow"][Math.floor(Math.random() * 4)],
+                        value: Math.floor(Math.random() * 10).toString(),
+                      })
+                    }
+
+                    return {
+                      ...prev,
+                      [specialEffect.targetPlayer]: [...targetHand, ...newCards],
+                    }
+                  })
+                }, 500)
+              }
             }
             break
 
@@ -480,7 +476,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     playerSaidUno,
     stackedCards,
     canStack,
-    isHost,
   ])
 
   // Periodic game state synchronization for multiplayer
@@ -670,7 +665,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     if (socketClient && socketClient.isConnected() && gameMode === "multi") {
       const timestamp = Date.now()
 
-      // Create comprehensive action payload with complete game state
+      // Create comprehensive action payload
       const actionPayload = {
         roomId: currentRoom.id,
         action: action,
@@ -679,25 +674,22 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           playerId,
           playerName,
           timestamp,
-          // Include complete game state for better synchronization
-          completeGameState: {
-            deck: deck.length, // Send count only for performance
-            playerHands: Object.keys(playerHands).reduce((acc, name) => {
-              acc[name] = playerHands[name]?.length || 0
-              return acc
-            }, {}),
-            discardPile,
-            currentPlayerIndex,
-            direction,
-            stackedCards,
-            canStack,
-            playerSaidUno,
-          },
         },
       }
 
       console.log(`📤 Sending ${action} to server:`, actionPayload)
       socketClient.gameAction(actionPayload)
+
+      // Log current state for debugging
+      console.log(`📊 Current game state after ${action}:`, {
+        currentPlayerIndex,
+        currentPlayer: getCurrentPlayerName(),
+        discardPileTop: getTopCard(),
+        playerHandSizes: Object.keys(playerHands).reduce((acc, name) => {
+          acc[name] = playerHands[name]?.length || 0
+          return acc
+        }, {}),
+      })
     } else {
       console.log(`Local action: ${action}`, data)
     }
@@ -1180,10 +1172,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         specialEffect: {
           skipTurn,
           drawCardCount,
-          targetPlayer: drawCardCount > 0 ? allPlayers[getNextPlayerIndex()].name : null,
+          targetPlayer: drawCardCount > 0 ? allPlayers[nextPlayerIndex].name : null,
         },
-        // Force immediate sync
-        forceSync: true,
       })
 
       // Handle drawing cards for the next player if needed
