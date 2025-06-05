@@ -177,6 +177,7 @@ export class SocketClient {
   gameAction(actionData: any) {
     if (this.isConnected()) {
       try {
+        console.log(`📤 Sending game action: ${actionData.action}`, actionData)
         this.emit("game-action", actionData)
 
         // Store the last action for potential retry
@@ -190,7 +191,7 @@ export class SocketClient {
             this.emit("game-action", actionData)
             this._lastAction = null
           }
-        }, 2000)
+        }, 1000) // Reduced timeout for faster retry
       } catch (error) {
         console.error("❌ Error sending game action:", error)
         this.queueAction(actionData)

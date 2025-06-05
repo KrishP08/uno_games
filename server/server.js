@@ -228,23 +228,35 @@ io.on("connection", (socket) => {
     const { roomId, action, gameData } = data
     const room = gameRooms[roomId]
 
-    if (!room) return
+    if (!room) {
+      console.log(`❌ Room not found for game action: ${roomId}`)
+      return
+    }
 
-    console.log(`🎮 Game action in ${room.name}: ${action}`)
+    console.log(`🎮 Game action in ${room.name}: ${action} from ${playerSockets[socket.id]?.playerName}`)
 
     // Update room game state if provided
     if (gameData) {
-      room.gameState = gameData
+      room.gameState = { ...room.gameState, ...gameData }
     }
 
     // Broadcast game action to ALL players in room INCLUDING sender
     // This ensures consistent state across all clients
-    io.to(roomId).emit("game-update", {
+    const gameUpdate = {
       action,
       data: gameData,
       playerId: playerSockets[socket.id]?.playerId,
       playerName: playerSockets[socket.id]?.playerName,
-    })
+      timestamp: Date.now(),
+    }
+
+    console.log(`📡 Broadcasting to room ${roomId}:`, gameUpdate)
+
+    // Send to all players in the room
+    io.to(roomId).emit("game-update", gameUpdate)
+
+    // Also send confirmation back to sender
+    socket.emit("action-confirmed", { action, timestamp: gameUpdate.timestamp })
   })
 
   // Handle starting a game
@@ -339,6 +351,11 @@ io.on("connection", (socket) => {
   // Send initial room list when client connects
   const roomList = Object.values(gameRooms)
   socket.emit("room-list", roomList)
+
+  // Handle action confirmations
+  socket.on("action-confirmed", (data) => {
+    console.log(`✅ Action confirmed: ${data.action}`)
+  })
 })
 
 // Cleanup old rooms periodically (every 30 minutes)
