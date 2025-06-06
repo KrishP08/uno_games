@@ -14,19 +14,19 @@ export function Card({ color, value, onClick, playable = true, isAnimating = fal
   const getCardColor = () => {
     switch (color) {
       case "red":
-        return "bg-red-600"
+        return "bg-gradient-to-br from-red-600 via-red-500 to-red-700"
       case "blue":
-        return "bg-blue-600"
+        return "bg-gradient-to-br from-blue-600 via-blue-500 to-blue-700"
       case "green":
-        return "bg-green-600"
+        return "bg-gradient-to-br from-green-600 via-green-500 to-green-700"
       case "yellow":
-        return "bg-yellow-500"
+        return "bg-gradient-to-br from-yellow-500 via-yellow-400 to-yellow-600"
       case "wild":
-        // For wild cards, use a gradient background
-        return "bg-gradient-to-br from-red-600 via-blue-600 to-green-600"
+        // For wild cards, use a rainbow gradient background
+        return "bg-gradient-to-br from-red-500 via-blue-500 via-green-500 to-purple-500"
       default:
         // If color is somehow undefined or invalid, use a fallback
-        return "bg-gray-800"
+        return "bg-gradient-to-br from-gray-700 to-gray-900"
     }
   }
 
@@ -56,21 +56,37 @@ export function Card({ color, value, onClick, playable = true, isAnimating = fal
   return (
     <div
       className={cn(
-        "w-16 h-24 rounded-lg flex flex-col items-center justify-center transform transition-all duration-300",
+        "uno-card w-20 h-28 rounded-xl flex flex-col items-center justify-center transform transition-all duration-300 shadow-lg border-2 border-white/20",
         getCardColor(),
-        playable ? "hover:scale-110 cursor-pointer" : "opacity-90 cursor-not-allowed",
+        playable
+          ? "hover:scale-110 hover:shadow-2xl cursor-pointer hover:border-white/40"
+          : "opacity-75 cursor-not-allowed",
         isAnimating && "animate-card-play",
+        "relative overflow-hidden",
       )}
       onClick={playable ? onClick : undefined}
     >
-      <div className={cn("text-2xl font-bold", getTextColor())}>{getSymbol()}</div>
+      {/* Main symbol */}
+      <div className={cn("text-3xl font-bold drop-shadow-lg", getTextColor())}>{getSymbol()}</div>
 
-      {/* Card border */}
+      {/* Card border with enhanced glow effect */}
       <div className="absolute inset-1 border-2 border-white/30 rounded-lg pointer-events-none"></div>
 
-      {/* Card corners */}
-      <div className={cn("absolute top-1 left-1 text-xs font-bold", getTextColor())}>{getSymbol()}</div>
-      <div className={cn("absolute bottom-1 right-1 text-xs font-bold", getTextColor())}>{getSymbol()}</div>
+      {/* Corner symbols */}
+      <div className={cn("absolute top-2 left-2 text-xs font-bold drop-shadow", getTextColor())}>{getSymbol()}</div>
+      <div className={cn("absolute bottom-2 right-2 text-xs font-bold drop-shadow rotate-180", getTextColor())}>
+        {getSymbol()}
+      </div>
+
+      {/* Shine effect for playable cards */}
+      {playable && (
+        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+      )}
+
+      {/* Special glow for wild cards */}
+      {color === "wild" && (
+        <div className="absolute inset-0 bg-gradient-to-r from-red-500/20 via-blue-500/20 via-green-500/20 to-purple-500/20 animate-pulse pointer-events-none"></div>
+      )}
     </div>
   )
 }

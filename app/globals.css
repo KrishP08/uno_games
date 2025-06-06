@@ -75,40 +75,101 @@
   }
 }
 
-/* Card animations */
+/* Enhanced Card animations with Steam-like effects */
 @keyframes card-play {
   0% {
-    transform: scale(1) translateY(0);
+    transform: scale(1) translateY(0) rotateY(0deg);
     opacity: 1;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+  25% {
+    transform: scale(1.1) translateY(-10px) rotateY(5deg);
+    opacity: 1;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
   }
   50% {
-    transform: scale(1.2) translateY(-20px);
+    transform: scale(1.2) translateY(-20px) rotateY(0deg);
     opacity: 1;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+  }
+  75% {
+    transform: scale(1.1) translateY(-10px) rotateY(-5deg);
+    opacity: 1;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
   }
   100% {
-    transform: scale(1) translateY(0);
+    transform: scale(1) translateY(0) rotateY(0deg);
     opacity: 1;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   }
 }
 
 @keyframes card-draw {
   0% {
-    transform: scale(1);
+    transform: scale(1) rotateX(0deg);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
   50% {
-    transform: scale(0.9);
+    transform: scale(0.95) rotateX(10deg);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
   }
   100% {
+    transform: scale(1) rotateX(0deg);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+}
+
+@keyframes card-hover {
+  0% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  100% {
+    transform: translateY(-8px) scale(1.05);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.8), 0 0 30px rgba(59, 130, 246, 0.6);
+  }
+}
+
+@keyframes uno-button-pulse {
+  0%,
+  100% {
     transform: scale(1);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.8), 0 0 30px rgba(239, 68, 68, 0.6);
   }
 }
 
 .animate-card-play {
-  animation: card-play 0.5s ease-in-out;
+  animation: card-play 0.6s ease-in-out;
 }
 
 .animate-card-draw {
-  animation: card-draw 0.3s ease-in-out;
+  animation: card-draw 0.4s ease-in-out;
+}
+
+.animate-card-hover {
+  animation: card-hover 0.3s ease-out forwards;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+.animate-uno-button-pulse {
+  animation: uno-button-pulse 1s ease-in-out infinite;
 }
 
 .animate-fade-in {
@@ -118,9 +179,11 @@
 @keyframes fade-in {
   0% {
     opacity: 0;
+    transform: translateY(10px);
   }
   100% {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -152,4 +215,97 @@
 
 .animate-bounce {
   animation: bounce 1s infinite;
+}
+
+/* Steam-like gradient backgrounds */
+.steam-gradient-bg {
+  background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #1e293b 100%);
+}
+
+.steam-card-bg {
+  background: linear-gradient(145deg, #1e293b 0%, #334155 30%, #475569 60%, #1e293b 100%);
+}
+
+.steam-button-bg {
+  background: linear-gradient(145deg, #3b82f6 0%, #1d4ed8 50%, #1e40af 100%);
+}
+
+/* Enhanced card styles */
+.uno-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+}
+
+.uno-card:hover {
+  animation: card-hover 0.3s ease-out forwards;
+}
+
+.uno-card.playable {
+  cursor: pointer;
+}
+
+.uno-card.playable:hover {
+  animation: card-hover 0.3s ease-out forwards;
+}
+
+/* Player indicator styles */
+.player-indicator {
+  position: relative;
+  overflow: hidden;
+}
+
+.player-indicator::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.player-indicator.active::before {
+  left: 100%;
+}
+
+/* Turn indicator glow */
+.turn-glow {
+  position: relative;
+}
+
+.turn-glow::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: linear-gradient(45deg, #fbbf24, #f59e0b, #d97706, #fbbf24);
+  z-index: -1;
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* UNO button special effects */
+.uno-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.uno-button::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transition: width 0.6s, height 0.6s, top 0.6s, left 0.6s;
+  transform: translate(-50%, -50%);
+}
+
+.uno-button:active::before {
+  width: 300px;
+  height: 300px;
+  top: 50%;
+  left: 50%;
 }

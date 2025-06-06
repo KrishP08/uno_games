@@ -10,7 +10,7 @@ interface PlayerHandProps {
 
 export function PlayerHand({ cards, onPlayCard, canPlay, canStack = false }: PlayerHandProps) {
   return (
-    <div className="flex flex-wrap justify-center">
+    <div className="flex flex-wrap justify-center gap-2 p-4">
       {cards.map((card, index) => {
         // Determine if this card can be stacked (only draw2 or wild4 when stacking is active)
         const isStackable = canStack && (card.value === "draw2" || card.value === "wild4")
@@ -18,8 +18,13 @@ export function PlayerHand({ cards, onPlayCard, canPlay, canStack = false }: Pla
         return (
           <div
             key={index}
-            className={`m-1 transform hover:-translate-y-2 transition-transform duration-300 ${isStackable ? "animate-pulse" : ""}`}
-            style={{ zIndex: index }}
+            className={`transform transition-all duration-300 hover:scale-105 ${
+              isStackable ? "animate-glow-pulse" : ""
+            } ${canPlay ? "hover:-translate-y-3" : ""}`}
+            style={{
+              zIndex: index,
+              transform: `translateX(${index * -8}px)`, // Slight overlap for Steam-like effect
+            }}
           >
             <Card
               color={card.color}
