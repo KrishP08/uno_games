@@ -5,7 +5,19 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { ArrowLeft, Users, Play, Volume2, VolumeX, Mic, MicOff, RefreshCw, Settings, Zap } from "lucide-react"
+import {
+  ArrowLeft,
+  Users,
+  Play,
+  Volume2,
+  VolumeX,
+  Mic,
+  MicOff,
+  RefreshCw,
+  Settings,
+  Zap,
+  AlertTriangle,
+} from "lucide-react"
 import { PlayerHand } from "./player-hand"
 import { GameBoard } from "./game-board"
 import { OtherPlayerCards } from "./other-player-cards"
@@ -50,10 +62,13 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
   const [isDrawingCards, setIsDrawingCards] = useState(false)
   const [turnInProgress, setTurnInProgress] = useState(false)
   const [actionInProgress, setActionInProgress] = useState(false)
+  const [pendingDrawCount, setPendingDrawCount] = useState(0)
+  const [challengeablePlayer, setChallengeablePlayer] = useState(null)
 
   // Audio context for sound effects
   const audioContextRef = useRef(null)
   const actionTimeoutRef = useRef(null)
+  const unoTimeoutRef = useRef(null)
 
   // Check if current player is the host
   const isHost = () => {
@@ -67,6 +82,64 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       console.log("🏠 Room updated:", room)
     }
   }, [room])
+
+  // Scroll to player hand when game starts
+  useEffect(() => {
+    if (gameStarted && playerHands[playerName]?.length > 0) {
+      const playerHandElement = document.getElementById("player-hand")
+      if (playerHandElement) {
+        playerHandElement.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    }
+  }, [gameStarted, playerHands, playerName])
+
+  // Monitor UNO state and set up challenge timer
+  useEffect(() => {
+    const checkUnoChallenge = () => {
+      const allPlayers = getAllPlayers()
+
+      // Find players with exactly 1 card who haven't said UNO
+      const challengeablePlayers = allPlayers.filter((player) => {
+        const hand = playerHands[player.name] || []
+        return hand.length === 1 && !playerSaidUno[player.name] && player.name !== playerName
+      })
+
+      if (challengeablePlayers.length > 0) {
+        setChallengeablePlayer(challengeablePlayers[0].name)
+
+        // Set timeout for automatic penalty if no one challenges
+        if (unoTimeoutRef.current) {
+          clearTimeout(unoTimeoutRef.current)
+        }
+
+        unoTimeoutRef.current = setTimeout(() => {
+          // Auto-penalize if no challenge was made
+          const player = challengeablePlayers[0].name
+          const currentHand = playerHands[player] || []
+          if (currentHand.length === 1 && !playerSaidUno[player]) {
+            drawCards(player, 2)
+            setGameMessage(`${player} forgot to say UNO! Draws 2 cards automatically.`)
+            setChallengeablePlayer(null)
+          }
+        }, 3000) // 3 second window to challenge
+      } else {
+        setChallengeablePlayer(null)
+        if (unoTimeoutRef.current) {
+          clearTimeout(unoTimeoutRef.current)
+        }
+      }
+    }
+
+    if (gameStarted) {
+      checkUnoChallenge()
+    }
+
+    return () => {
+      if (unoTimeoutRef.current) {
+        clearTimeout(unoTimeoutRef.current)
+      }
+    }
+  }, [playerHands, playerSaidUno, gameStarted, playerName])
 
   // Set up Socket.IO listeners for real-time updates
   useEffect(() => {
@@ -113,6 +186,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           setPlayerSaidUno(data.gameState.playerSaidUno || {})
           setStackedCards(data.gameState.stackedCards || [])
           setCanStack(data.gameState.canStack || false)
+          setPendingDrawCount(data.gameState.pendingDrawCount || 0)
         }
         setGameStarted(true)
         setRoundWinner(null)
@@ -167,6 +241,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setPlayerSaidUno(playerSaidUno || {})
               setStackedCards([])
               setCanStack(false)
+              setPendingDrawCount(0)
               setDrawnThisTurn(0)
               setMustPlayDrawnCard(false)
               setTurnInProgress(false)
@@ -185,6 +260,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 direction: newDirection,
                 stackedCards: newStackedCards,
                 canStack: newCanStack,
+                pendingDrawCount: newPendingDrawCount,
                 specialEffect,
               } = data.data
 
@@ -219,6 +295,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               if (newCanStack !== undefined) {
                 setCanStack(newCanStack)
               }
+              if (newPendingDrawCount !== undefined) {
+                setPendingDrawCount(newPendingDrawCount)
+              }
 
               // Reset turn state
               setDrawnThisTurn(0)
@@ -231,7 +310,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               if (specialEffect?.skipTurn) message += ` - Turn skipped!`
               if (newDirection !== direction) message += " - Direction reversed!"
               if (specialEffect?.drawCardCount > 0)
-                message += ` - ${specialEffect.targetPlayer} draws ${specialEffect.drawCardCount} cards!`
+                message += ` - ${specialEffect.targetPlayer} must draw ${specialEffect.drawCardCount} cards!`
 
               setGameMessage(message)
               playCardSound()
@@ -240,7 +319,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
           case "DRAW_CARDS":
             if (data.data && data.playerId !== playerId) {
-              const { player, numCards, drawnCards, newDeck } = data.data
+              const { player, numCards, drawnCards, newDeck, pendingDrawCount: newPendingDrawCount } = data.data
               console.log(`🎴 ${player} drew ${numCards} cards`)
 
               // Update player's hand with exact cards from server
@@ -257,6 +336,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               // Update deck if provided
               if (newDeck) {
                 setDeck(newDeck)
+              }
+
+              // Update pending draw count
+              if (newPendingDrawCount !== undefined) {
+                setPendingDrawCount(newPendingDrawCount)
               }
 
               // Reset UNO state for player who drew cards
@@ -290,6 +374,19 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               }))
               setGameMessage(`${data.data.player} said UNO!`)
               playUnoSound()
+            }
+            break
+
+          case "UNO_CHALLENGE":
+            if (data.data) {
+              const { challenger, target, success } = data.data
+              if (success) {
+                setGameMessage(
+                  `${challenger} successfully challenged ${target}! ${target} draws 2 cards for not saying UNO!`,
+                )
+              } else {
+                setGameMessage(`${challenger} failed to challenge ${target}. ${challenger} draws 2 cards as penalty!`)
+              }
             }
             break
 
@@ -331,6 +428,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                 playerSaidUno,
                 stackedCards,
                 canStack,
+                pendingDrawCount,
               } = data.data
 
               if (deck) setDeck(deck)
@@ -341,6 +439,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               if (playerSaidUno) setPlayerSaidUno(playerSaidUno)
               if (stackedCards) setStackedCards(stackedCards)
               if (canStack !== undefined) setCanStack(canStack)
+              if (pendingDrawCount !== undefined) setPendingDrawCount(pendingDrawCount)
 
               setGameMessage("Game state synchronized")
             }
@@ -354,16 +453,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setShowEndGameCards(true)
               setGameMessage(`${winner} wins the round!`)
               playWinSound()
-            }
-            break
-
-          case "UNO_CHALLENGE":
-            if (data.data) {
-              const { challenger, target } = data.data
-              if (target === playerName) {
-                drawCards(playerName, 2)
-              }
-              setGameMessage(`${challenger} challenged ${target} for not saying UNO!`)
             }
             break
 
@@ -416,6 +505,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     return () => {
       if (actionTimeoutRef.current) {
         clearTimeout(actionTimeoutRef.current)
+      }
+      if (unoTimeoutRef.current) {
+        clearTimeout(unoTimeoutRef.current)
       }
     }
   }, [])
@@ -522,7 +614,9 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
   // Handle UNO call via voice or button
   const handleUnoCall = () => {
-    if (playerHands[playerName]?.length === 1) {
+    const hand = playerHands[playerName] || []
+    if (hand.length <= 2) {
+      // Allow UNO call when 2 or fewer cards
       setPlayerSaidUno({
         ...playerSaidUno,
         [playerName]: true,
@@ -531,6 +625,40 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       playUnoSound()
       sendGameAction("UNO_CALL", { player: playerName })
       setUnoReminderShown(false)
+    }
+  }
+
+  // Handle UNO challenge
+  const handleUnoChallenge = (targetPlayer) => {
+    if (!gameStarted || !targetPlayer) return
+
+    const targetHand = playerHands[targetPlayer] || []
+
+    if (targetHand.length === 1 && !playerSaidUno[targetPlayer]) {
+      // Successful challenge
+      drawCards(targetPlayer, 2)
+      setGameMessage(`${playerName} caught ${targetPlayer}! ${targetPlayer} draws 2 cards for not saying UNO!`)
+
+      sendGameAction("UNO_CHALLENGE", {
+        challenger: playerName,
+        target: targetPlayer,
+        success: true,
+      })
+    } else {
+      // Failed challenge - challenger draws 2 cards
+      drawCards(playerName, 2)
+      setGameMessage(`${playerName} failed to challenge ${targetPlayer}. ${playerName} draws 2 cards as penalty!`)
+
+      sendGameAction("UNO_CHALLENGE", {
+        challenger: playerName,
+        target: targetPlayer,
+        success: false,
+      })
+    }
+
+    setChallengeablePlayer(null)
+    if (unoTimeoutRef.current) {
+      clearTimeout(unoTimeoutRef.current)
     }
   }
 
@@ -639,6 +767,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       [player]: false,
     }))
 
+    // Update pending draw count
+    const newPendingDrawCount = Math.max(0, pendingDrawCount - numCards)
+    setPendingDrawCount(newPendingDrawCount)
+
     // Only send game action if this is the current player's action and not from server
     if (player === playerName && !forcedCards) {
       sendGameAction("DRAW_CARDS", {
@@ -646,6 +778,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         numCards: drawnCards.length,
         drawnCards,
         newDeck: updatedDeck,
+        pendingDrawCount: newPendingDrawCount,
       })
     }
 
@@ -656,8 +789,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setIsDrawingCards(false)
       setDrawnThisTurn(drawnThisTurn + drawnCards.length)
 
-      // Auto-advance turn after drawing if not force draw mode
-      if (!currentRoom.settings?.forceDrawEnabled && !currentRoom.settings?.unlimitedDrawEnabled) {
+      // Auto-advance turn after drawing if not force draw mode and no pending draws
+      if (
+        !currentRoom.settings?.forceDrawEnabled &&
+        !currentRoom.settings?.unlimitedDrawEnabled &&
+        newPendingDrawCount === 0
+      ) {
         // Clear any existing timeout
         if (actionTimeoutRef.current) {
           clearTimeout(actionTimeoutRef.current)
@@ -715,6 +852,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     if (currentPlayer !== playerName) {
       setGameMessage("It's not your turn!")
+      return
+    }
+
+    // If there are pending draws from +2/+4 cards, draw those first
+    if (pendingDrawCount > 0) {
+      drawCards(playerName, pendingDrawCount)
       return
     }
 
@@ -807,6 +950,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       playerSaidUno: initialUnoState,
       stackedCards: [],
       canStack: false,
+      pendingDrawCount: 0,
     }
 
     // Set local state
@@ -822,6 +966,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setGameWinner(null)
     setStackedCards([])
     setCanStack(false)
+    setPendingDrawCount(0)
     setShowEndGameCards(false)
     setUnoReminderShown(false)
     setDrawnThisTurn(0)
@@ -829,6 +974,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setIsDrawingCards(false)
     setTurnInProgress(false)
     setActionInProgress(false)
+    setChallengeablePlayer(null)
 
     // Notify other players via Socket.IO
     if (socketClient && socketClient.isConnected() && gameMode === "multi") {
@@ -900,6 +1046,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     setDrawnThisTurn(0)
     setTurnInProgress(false)
     setActionInProgress(false)
+    setPendingDrawCount(0)
+    setChallengeablePlayer(null)
 
     sendGameAction("ROUND_WIN", { winner, newScores })
 
@@ -919,6 +1067,20 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
 
     const hand = playerHands[currentPlayer.name] || []
     const topCard = discardPile[discardPile.length - 1]
+
+    // Handle pending draws first
+    if (pendingDrawCount > 0) {
+      setTimeout(
+        () => {
+          drawCards(currentPlayer.name, pendingDrawCount)
+          setTimeout(() => {
+            advanceTurn()
+          }, 1200)
+        },
+        1200 + Math.random() * 800,
+      )
+      return
+    }
 
     // Get computer's move
     const move = getComputerMove(hand, topCard, canStack, currentRoom.settings?.difficulty || "medium")
@@ -940,23 +1102,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         },
         1200 + Math.random() * 800,
       )
-    }
-  }
-
-  // Show UNO reminder
-  const showUnoReminder = () => {
-    if (!unoReminderShown) {
-      setUnoReminderShown(true)
-      setGameMessage(`Don't forget to say UNO! Click the UNO button or you'll draw 2 cards!`)
-      playUnoReminderSound()
-
-      setTimeout(() => {
-        if (playerHands[playerName]?.length === 1 && !playerSaidUno[playerName]) {
-          drawCards(playerName, 2)
-          setGameMessage(`${playerName} forgot to say UNO! Draw 2 cards.`)
-          setUnoReminderShown(false)
-        }
-      }, 5000)
     }
   }
 
@@ -1047,6 +1192,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       let drawCardCount = 0
       let newStackedCards = [...stackedCards]
       let newCanStack = false
+      let newPendingDrawCount = pendingDrawCount
 
       // Handle special card effects
       switch (card.value) {
@@ -1064,13 +1210,16 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         case "draw2":
           if (currentRoom.settings?.stackingEnabled) {
             newStackedCards.push(card)
+            newPendingDrawCount += 2
             const nextPlayer = allPlayers[nextPlayerIndex].name
             const nextPlayerHand = playerHands[nextPlayer] || []
-            newCanStack = nextPlayerHand.some((c) => c.value === "draw2")
+            newCanStack = nextPlayerHand.some((c) => c.value === "draw2" || c.value === "wild4")
 
             if (!newCanStack) {
-              drawCardCount = newStackedCards.length * 2
+              // Next player must draw all stacked cards
+              drawCardCount = newPendingDrawCount
               newStackedCards = []
+              newPendingDrawCount = 0
               skipTurn = true
               nextPlayerIndex = getNextPlayerIndex(nextPlayerIndex)
             }
@@ -1091,16 +1240,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setCurrentPlayerIndex(nextPlayerIndex)
       setStackedCards(newStackedCards)
       setCanStack(newCanStack)
+      setPendingDrawCount(newPendingDrawCount)
 
       // Check if player has won the round
       if (newHand.length === 0) {
         handleRoundWin(playerName)
         return
-      }
-
-      // Check if player should have said UNO
-      if (newHand.length === 1 && !playerSaidUno[playerName]) {
-        showUnoReminder()
       }
 
       // Send comprehensive game action
@@ -1114,6 +1259,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         direction: newDirection,
         stackedCards: newStackedCards,
         canStack: newCanStack,
+        pendingDrawCount: newPendingDrawCount,
         specialEffect: {
           skipTurn,
           drawCardCount,
@@ -1169,20 +1315,37 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     let nextPlayerIndex = getNextPlayerIndex()
     let drawCardCount = 0
     let skipTurn = false
+    let newPendingDrawCount = pendingDrawCount
 
     if (card.value === "wild4") {
-      drawCardCount = 4
-      skipTurn = true
-      nextPlayerIndex = getNextPlayerIndex(nextPlayerIndex)
+      if (currentRoom.settings?.stackingEnabled) {
+        newPendingDrawCount += 4
+        const nextPlayer = allPlayers[nextPlayerIndex].name
+        const nextPlayerHand = playerHands[nextPlayer] || []
+        const canStackWild4 = nextPlayerHand.some((c) => c.value === "wild4")
+
+        if (!canStackWild4) {
+          drawCardCount = newPendingDrawCount
+          newPendingDrawCount = 0
+          skipTurn = true
+          nextPlayerIndex = getNextPlayerIndex(nextPlayerIndex)
+        }
+      } else {
+        drawCardCount = 4
+        skipTurn = true
+        nextPlayerIndex = getNextPlayerIndex(nextPlayerIndex)
+      }
     }
 
     setCurrentPlayerIndex(nextPlayerIndex)
+    setPendingDrawCount(newPendingDrawCount)
 
     sendGameAction("WILD_COLOR_SELECT", {
       card,
       playerName,
       currentPlayerIndex: nextPlayerIndex,
       discardPile: [...discardPile, card],
+      pendingDrawCount: newPendingDrawCount,
       specialEffect: {
         drawCardCount,
         skipTurn,
@@ -1193,8 +1356,12 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
     if (card.value === "wild4") {
       const targetPlayer = allPlayers[nextPlayerIndex].name
       setTimeout(() => {
-        drawCards(targetPlayer, 4)
-        setGameMessage(`Color changed to ${color}! ${targetPlayer} draws 4 cards and loses a turn!`)
+        if (drawCardCount > 0) {
+          drawCards(targetPlayer, drawCardCount)
+        }
+        setGameMessage(
+          `Color changed to ${color}! ${targetPlayer} ${drawCardCount > 0 ? `draws ${drawCardCount} cards and ` : ""}${skipTurn ? "loses a turn!" : ""}`,
+        )
       }, 800)
     } else {
       setGameMessage(`Color changed to ${color}!`)
@@ -1205,10 +1372,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       handleRoundWin(playerName)
       setPendingWildCard(null)
       return
-    }
-
-    if (newHand.length === 1 && !playerSaidUno[playerName]) {
-      showUnoReminder()
     }
 
     setPendingWildCard(null)
@@ -1226,24 +1389,6 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         setTimeout(runComputerTurns, 800)
       }
     }, 1200)
-  }
-
-  const handleUnoChallenge = (targetPlayer) => {
-    if (!gameStarted) return
-
-    const targetHand = playerHands[targetPlayer] || []
-
-    if (targetHand.length === 1 && !playerSaidUno[targetPlayer]) {
-      drawCards(targetPlayer, 2)
-      setGameMessage(`${playerName} caught ${targetPlayer}! ${targetPlayer} draws 2 cards for not saying UNO!`)
-
-      sendGameAction("UNO_CHALLENGE", {
-        challenger: playerName,
-        target: targetPlayer,
-      })
-    } else {
-      setGameMessage(`Invalid challenge! ${targetPlayer} either said UNO or doesn't have 1 card.`)
-    }
   }
 
   if (!currentRoom) {
@@ -1346,8 +1491,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             {getAllPlayers().map((player, index) => {
               const isCurrentTurn = getCurrentPlayerName() === player.name
               const hasOneCard = playerHands[player.name]?.length === 1
+              const hasTwoCards = playerHands[player.name]?.length === 2
               const saidUno = playerSaidUno[player.name]
-              const canChallenge = hasOneCard && !saidUno && player.name !== playerName && gameStarted
 
               return (
                 <div key={index} className="flex items-center gap-2">
@@ -1384,21 +1529,28 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                       <div className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-400 rounded-full animate-ping"></div>
                     )}
                   </div>
-
-                  {/* UNO Challenge button */}
-                  {canChallenge && (
-                    <Button
-                      size="sm"
-                      onClick={() => handleUnoChallenge(player.name)}
-                      className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-bold text-xs px-3 py-1 h-8 animate-bounce"
-                    >
-                      ⚡ Challenge!
-                    </Button>
-                  )}
                 </div>
               )
             })}
           </div>
+
+          {/* Challenge button for UNO violations */}
+          {challengeablePlayer && (
+            <div className="mb-4 p-3 bg-gradient-to-r from-red-800 to-red-700 border border-red-600 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-yellow-400 animate-bounce" />
+                  <span className="text-white font-medium">{challengeablePlayer} has 1 card but didn't say UNO!</span>
+                </div>
+                <Button
+                  onClick={() => handleUnoChallenge(challengeablePlayer)}
+                  className="bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-700 hover:to-yellow-800 text-black font-bold animate-pulse"
+                >
+                  ⚡ Challenge UNO!
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Game status and controls */}
           <div className="flex justify-between items-center">
@@ -1408,6 +1560,11 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
                   <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
                   <span className="text-green-400 font-medium">🎮 Game in progress</span>
                   {syncInProgress && <span className="text-yellow-400 text-xs">⚡ Syncing...</span>}
+                  {pendingDrawCount > 0 && (
+                    <span className="bg-red-600 px-2 py-1 rounded text-xs text-white animate-bounce">
+                      +{pendingDrawCount} pending
+                    </span>
+                  )}
                 </div>
               ) : (
                 <span className="text-slate-400">
@@ -1520,20 +1677,29 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
           )}
 
           {/* Player's hand with UNO button - Enhanced Steam-like design */}
-          <Card className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border-slate-700 shadow-2xl">
+          <Card
+            id="player-hand"
+            className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border-slate-700 shadow-2xl"
+          >
             <CardHeader className="pb-3 bg-gradient-to-r from-blue-900/20 to-purple-900/20">
               <div className="flex justify-between items-center">
                 <CardTitle className="text-center text-white text-xl">
                   Your Hand ({playerHands[playerName]?.length || 0} cards)
                 </CardTitle>
 
-                {/* UNO Button moved here */}
-                {playerHands[playerName]?.length === 1 && !playerSaidUno[playerName] && gameStarted && (
+                {/* UNO Button - Show when player has 2 or fewer cards */}
+                {playerHands[playerName]?.length <= 2 && playerHands[playerName]?.length > 0 && gameStarted && (
                   <Button
                     onClick={handleUnoCall}
-                    className="bg-gradient-to-r from-red-600 via-red-500 to-red-600 hover:from-red-700 hover:via-red-600 hover:to-red-700 text-white font-bold text-lg px-6 py-3 h-12 animate-bounce shadow-lg shadow-red-500/50 border-2 border-red-400"
+                    disabled={playerSaidUno[playerName]}
+                    className={`${
+                      playerSaidUno[playerName]
+                        ? "bg-gray-600 text-gray-300 cursor-not-allowed"
+                        : "bg-gradient-to-r from-red-600 via-red-500 to-red-600 hover:from-red-700 hover:via-red-600 hover:to-red-700 animate-uno-button-pulse"
+                    } text-white font-bold text-lg px-6 py-3 h-12 shadow-lg border-2 border-red-400 uno-button`}
                   >
-                    <Zap className="mr-2 h-5 w-5" />🔊 UNO!
+                    <Zap className="mr-2 h-5 w-5" />
+                    {playerSaidUno[playerName] ? "✅ UNO Said!" : "🔊 Say UNO!"}
                   </Button>
                 )}
               </div>

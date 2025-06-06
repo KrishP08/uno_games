@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { ArrowLeft, RefreshCw, Users, Wifi, WifiOff, Zap } from "lucide-react"
+import { ArrowLeft, RefreshCw, Users, Wifi, WifiOff } from "lucide-react"
 
 export function Lobby({
   playerName,
@@ -20,7 +20,6 @@ export function Lobby({
   gameMode,
   onBackToModeSelect,
   onRefreshRooms,
-  onCreateInstantMultiplayer,
   connectionStatus,
 }) {
   const [roomName, setRoomName] = useState("")
@@ -32,7 +31,7 @@ export function Lobby({
   const [unlimitedDrawEnabled, setUnlimitedDrawEnabled] = useState(false)
   const [forcePlayEnabled, setForcePlayEnabled] = useState(true)
   const [jumpInEnabled, setJumpInEnabled] = useState(false)
-  const [activeTab, setActiveTab] = useState("instant")
+  const [activeTab, setActiveTab] = useState("join")
   const [computerPlayers, setComputerPlayers] = useState(3)
   const [nameInput, setNameInput] = useState("")
   const [joinCode, setJoinCode] = useState("")
@@ -279,33 +278,11 @@ export function Lobby({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="instant" value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="instant">🚀 Instant</TabsTrigger>
+            <Tabs defaultValue="join" value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="join">🔗 Join</TabsTrigger>
                 <TabsTrigger value="create">🏠 Create</TabsTrigger>
               </TabsList>
-
-              <TabsContent value="instant" className="mt-6">
-                <div className="text-center space-y-6">
-                  <div className="bg-gradient-to-r from-purple-500 to-pink-500 p-6 rounded-lg text-white">
-                    <Zap className="h-12 w-12 mx-auto mb-4" />
-                    <h3 className="text-2xl font-bold mb-2">Instant Multiplayer</h3>
-                    <p className="text-purple-100">Jump straight into a game with smart AI players!</p>
-                  </div>
-                  <Button
-                    onClick={onCreateInstantMultiplayer}
-                    size="lg"
-                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-4 px-8 text-lg"
-                  >
-                    <Zap className="mr-2 h-5 w-5" />
-                    Start Instant Game
-                  </Button>
-                  <p className="text-sm text-muted-foreground">
-                    Perfect for quick games • No waiting • Smart AI opponents
-                  </p>
-                </div>
-              </TabsContent>
 
               <TabsContent value="join" className="mt-6">
                 <div className="space-y-4">
@@ -352,7 +329,7 @@ export function Lobby({
                       <Users className="h-12 w-12 mx-auto text-muted-foreground mb-2" />
                       <p className="text-muted-foreground font-medium">No rooms available</p>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {isOnline ? "Create a room or try instant play!" : "Server offline - try instant play!"}
+                        {isOnline ? "Create a room to get started!" : "Server offline - create a local room!"}
                       </p>
                     </div>
                   ) : (
