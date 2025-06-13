@@ -80,15 +80,25 @@ export class SocketClient {
       "game-update",
       "game-started",
       "start-game-error",
+      "full-game-state", // Added for full state refresh
+      "game-state-error", // Added for errors related to state requests
     ]
 
     events.forEach((event) => {
       this.socket!.on(event, (data) => {
         console.log(`📨 Received ${event}:`, data)
 
-        // Cache game state updates for reconnection
-        if (event === "game-update" && data.action === "GAME_STATE_SYNC") {
-          this.gameStateCache = data.data
+        // General game state caching from any game-update might be useful,
+        // but the specific "GAME_STATE_SYNC" action type is deprecated.
+        // Example: if (event === "game-update") { this.gameStateCache = data.data; }
+        // For now, removing the specific GAME_STATE_SYNC cache logic.
+        if (event === "game-update") {
+          // This is a good place to cache the latest game state if needed for quick recovery on reconnect
+          // this.gameStateCache = data.data; // data.data here IS the gameState
+        }
+        if (event === "full-game-state") {
+          // Also cache if a full state is received
+          // this.gameStateCache = data.gameState;
         }
 
         this.handleMessage(event, data)
@@ -263,15 +273,13 @@ export class SocketClient {
     this.gameStateCache = null
   }
 
-  // Add this new method to force a full game state sync
-  forceGameStateSync(roomId: string, gameState: any) {
+  // Method to request a full game state refresh from the server
+  forceGameStateSync(roomId: string) {
     if (this.isConnected()) {
-      console.log("🔄 Forcing complete game state sync")
-      this.gameAction({
-        roomId,
-        action: "GAME_STATE_SYNC",
-        data: gameState,
-      })
+      console.log(`🔄 Requesting full game state sync for room: ${roomId}`)
+      this.emit("request-full-game-state", { roomId })
+    } else {
+      console.warn("⚠️ Socket not connected, cannot request full game state sync.")
     }
   }
 }

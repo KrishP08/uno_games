@@ -284,16 +284,215 @@ io.on("connection", (socket) => {
     console.log(`🎮 Game action in ${room.name}: ${action} from ${playerSockets[socket.id]?.playerName}`)
     room.lastActivity = Date.now()
 
-    // Update room game state if provided
-    if (data.data) {
-      room.gameState = { ...room.gameState, ...data.data }
+    // Server-side game logic will be processed here
+    let updatedGameState = room.gameState ? { ...room.gameState } : {};
+    const playedCard = data.data && data.data.playedCard; // Card played by the client
+    const currentPlayerId = playerSockets[socket.id]?.playerId;
+
+    if (action === "play-card" && playedCard && room.gameState) {
+      updatedGameState = JSON.parse(JSON.stringify(room.gameState)); // Deep copy
+
+      // Find the current player index based on socket.id, then map to gameState.players
+      const playerInfo = playerSockets[socket.id];
+      let currentPlayerIndex = -1;
+      if (playerInfo) {
+        currentPlayerIndex = updatedGameState.players.findIndex(p => p.id === playerInfo.playerId);
+      }
+
+      if (currentPlayerIndex === -1) {
+        console.error("Error: Could not find player in game state for game action");
+        // Potentially emit an error back to the client
+        return;
+      }
+
+      // Basic card play logic (remove card from hand, add to discard pile)
+      // This might be redundant if client already updated its state, but server should verify/enforce
+      // --- Server-Authoritative Card Play Logic ---
+      // 1. Identify Player and Card
+      const playerHand = updatedGameState.players[currentPlayerIndex].hand;
+      // Ensure playedCard from client has enough info (id, type, color) for a unique match.
+      // If card objects have unique IDs, matching by ID is best. Otherwise, match type, color, value.
+      const cardIndexInHand = playerHand.findIndex(card => card.id === playedCard.id ); // Assuming card.id is unique and sent by client
+
+      if (cardIndexInHand === -1) {
+        console.error(`Error: Player ${updatedGameState.players[currentPlayerIndex].name} tried to play card not in hand:`, playedCard);
+        socket.emit("play-error", { message: "Invalid card: Card not in hand." });
+        return;
+      }
+
+      // 2. Move Card: Hand -> Discard Pile
+      const actualPlayedCard = playerHand.splice(cardIndexInHand, 1)[0];
+      updatedGameState.discardPile.push(actualPlayedCard);
+      updatedGameState.lastPlayedCard = { ...actualPlayedCard }; // Store a copy
+
+      // Update currentColor based on the played card if it's not a Wild card.
+      // Wild card colors are set based on chosenColor.
+      if (actualPlayedCard.color !== "WILD") {
+        updatedGameState.currentColor = actualPlayedCard.color;
+      }
+
+      // Client might send its deck state if it had to draw before playing (e.g. draw, then play drawn card)
+      // This is less common if server handles draws entirely.
+      if (data.data.deck) {
+          updatedGameState.deck = data.data.deck;
+      }
+      // chosenColor is expected from client for Wild cards
+      if (actualPlayedCard.type === "WILD" || actualPlayedCard.type === "WILD_DRAW_FOUR") {
+        if (data.data.chosenColor) {
+            updatedGameState.currentColor = data.data.chosenColor;
+        } else {
+            console.error(`${actualPlayedCard.type} played without a chosenColor! Defaulting to RED.`);
+            updatedGameState.currentColor = "RED"; // Defaulting as a fallback
+            // It's better to enforce client sends this. Consider emitting an error.
+        }
+      }
+
+      // 3. Determine Next Player (preliminary)
+      const numPlayers = updatedGameState.players.length;
+      let nextPlayerIndex = (currentPlayerIndex + (updatedGameState.isReversed ? -1 : 1) + numPlayers) % numPlayers;
+
+      // 4. Apply Card-Specific Actions
+      if (actualPlayedCard.type === "DRAW_TWO") {
+        console.log(`Action: ${actualPlayedCard.type} by ${updatedGameState.players[currentPlayerIndex].name}. Target: ${updatedGameState.players[nextPlayerIndex].name}`);
+        const targetPlayerForDraw = updatedGameState.players[nextPlayerIndex];
+        for (let i = 0; i < 2; i++) {
+          if (updatedGameState.deck.length > 0) {
+            targetPlayerForDraw.hand.push(updatedGameState.deck.pop());
+          } else {
+            console.log("Deck empty, attempting to reshuffle for DRAW_TWO.");
+            // Reshuffle logic: keep the very last played card on discard, move rest to deck
+            const discardToReshuffle = updatedGameState.discardPile.slice(0, -1);
+            if (discardToReshuffle.length > 0) {
+                updatedGameState.deck = discardToReshuffle;
+                updatedGameState.discardPile = [updatedGameState.discardPile.slice(-1)[0]]; // Keep last actual played card
+                // Shuffle deck
+                for (let j = updatedGameState.deck.length - 1; j > 0; j--) {
+                    const k = Math.floor(Math.random() * (j + 1));
+                    [updatedGameState.deck[j], updatedGameState.deck[k]] = [updatedGameState.deck[k], updatedGameState.deck[j]];
+                }
+                if (updatedGameState.deck.length > 0) {
+                     targetPlayerForDraw.hand.push(updatedGameState.deck.pop());
+                } else {
+                    console.log("Deck still empty after reshuffle attempt during DRAW_TWO.");
+                }
+            } else {
+                 console.log("Not enough cards in discard pile to reshuffle for DRAW_TWO.");
+            }
+          }
+        }
+        console.log(`${targetPlayerForDraw.name} draws 2 cards. Hand size: ${targetPlayerForDraw.hand.length}`);
+        // Turn skips to the player AFTER the one who drew cards
+        updatedGameState.currentPlayerIndex = (nextPlayerIndex + (updatedGameState.isReversed ? -1 : 1) + numPlayers) % numPlayers;
+
+      } else if (actualPlayedCard.type === "WILD_DRAW_FOUR") {
+        console.log(`Action: ${actualPlayedCard.type} by ${updatedGameState.players[currentPlayerIndex].name}. Target: ${updatedGameState.players[nextPlayerIndex].name}. Color: ${updatedGameState.currentColor}`);
+        const targetPlayerForDraw = updatedGameState.players[nextPlayerIndex];
+        for (let i = 0; i < 4; i++) {
+           if (updatedGameState.deck.length > 0) {
+            targetPlayerForDraw.hand.push(updatedGameState.deck.pop());
+          } else {
+            console.log("Deck empty, attempting to reshuffle for WILD_DRAW_FOUR.");
+            const discardToReshuffle = updatedGameState.discardPile.slice(0, -1);
+            if (discardToReshuffle.length > 0) {
+                updatedGameState.deck = discardToReshuffle;
+                updatedGameState.discardPile = [updatedGameState.discardPile.slice(-1)[0]];
+                 for (let j = updatedGameState.deck.length - 1; j > 0; j--) {
+                    const k = Math.floor(Math.random() * (j + 1));
+                    [updatedGameState.deck[j], updatedGameState.deck[k]] = [updatedGameState.deck[k], updatedGameState.deck[j]];
+                }
+                if (updatedGameState.deck.length > 0) {
+                     targetPlayerForDraw.hand.push(updatedGameState.deck.pop());
+                } else {
+                    console.log("Deck still empty after reshuffle attempt during WILD_DRAW_FOUR.");
+                }
+            } else {
+                console.log("Not enough cards in discard pile to reshuffle for WILD_DRAW_FOUR.");
+            }
+          }
+        }
+        console.log(`${targetPlayerForDraw.name} draws 4 cards. Hand size: ${targetPlayerForDraw.hand.length}`);
+        // Color is already set from chosenColor earlier
+        // Turn skips to the player AFTER the one who drew cards
+        updatedGameState.currentPlayerIndex = (nextPlayerIndex + (updatedGameState.isReversed ? -1 : 1) + numPlayers) % numPlayers;
+
+      } else if (actualPlayedCard.type === "SKIP") {
+        console.log(`Action: ${actualPlayedCard.type} by ${updatedGameState.players[currentPlayerIndex].name}. Player ${updatedGameState.players[nextPlayerIndex].name} is skipped.`);
+        // Skip the next player, so advance the turn by one additional step
+        updatedGameState.currentPlayerIndex = (nextPlayerIndex + (updatedGameState.isReversed ? -1 : 1) + numPlayers) % numPlayers;
+        console.log(`New current player index: ${updatedGameState.currentPlayerIndex}`);
+
+      } else if (actualPlayedCard.type === "REVERSE") {
+        console.log(`Action: ${actualPlayedCard.type} by ${updatedGameState.players[currentPlayerIndex].name}.`);
+        updatedGameState.isReversed = !updatedGameState.isReversed;
+        console.log(`Play direction reversed. New direction: ${updatedGameState.isReversed ? "Counter-Clockwise" : "Clockwise"}`);
+        if (numPlayers === 2) {
+          // In a 2-player game, Reverse acts like a Skip. The player who played Reverse plays again.
+          // So, the next player is effectively skipped.
+          updatedGameState.currentPlayerIndex = currentPlayerIndex;
+        } else {
+          // Next player is now based on the new direction from the current player
+          updatedGameState.currentPlayerIndex = (currentPlayerIndex + (updatedGameState.isReversed ? -1 : 1) + numPlayers) % numPlayers;
+        }
+        console.log(`New current player index: ${updatedGameState.currentPlayerIndex}`);
+      } else if (actualPlayedCard.type === "WILD") {
+        console.log(`Action: ${actualPlayedCard.type} played by ${updatedGameState.players[currentPlayerIndex].name}`);
+        if (data.data.chosenColor) {
+            updatedGameState.currentColor = data.data.chosenColor;
+            console.log(`Color chosen: ${data.data.chosenColor}`);
+        } else {
+            console.error("WILD card played without a chosenColor! Defaulting to Red.");
+            updatedGameState.currentColor = "RED"; // Defaulting
+        }
+        updatedGameState.currentPlayerIndex = nextPlayerIndex;
+      } else {
+        // Regular number card
+        updatedGameState.currentColor = actualPlayedCard.color;
+        updatedGameState.currentPlayerIndex = nextPlayerIndex;
+      }
+      room.gameState = updatedGameState;
+    } else if (action === "draw-card" && room.gameState && playerSockets[socket.id]) {
+        updatedGameState = JSON.parse(JSON.stringify(room.gameState)); // Deep copy
+        const playerInfo = playerSockets[socket.id];
+        const drawingPlayerIndex = updatedGameState.players.findIndex(p => p.id === playerInfo.playerId);
+
+        if (drawingPlayerIndex !== -1) {
+            if (updatedGameState.deck.length > 0) {
+                const drawnCard = updatedGameState.deck.pop();
+                updatedGameState.players[drawingPlayerIndex].hand.push(drawnCard);
+                console.log(`${updatedGameState.players[drawingPlayerIndex].name} drew a card: ${drawnCard.type} ${drawnCard.color}`);
+
+                // Client is expected to send if the turn passes or not via data.data.passTurn (boolean)
+                // Or client sends nextPlayerIndex directly if they know it.
+                // For now, if 'passTurn' is true or nextPlayerIndex is explicitly set by client:
+                if (data.data && data.data.passTurn === true) {
+                   updatedGameState.currentPlayerIndex = (drawingPlayerIndex + (updatedGameState.isReversed ? -1 : 1) + updatedGameState.players.length) % updatedGameState.players.length;
+                   console.log(`Turn passed to player index: ${updatedGameState.currentPlayerIndex}`);
+                } else if (data.data && data.data.hasOwnProperty('nextPlayerIndex')) {
+                   updatedGameState.currentPlayerIndex = data.data.nextPlayerIndex;
+                }
+                // If client doesn't specify, turn remains with the drawing player (they might play the drawn card)
+                // This part needs to be robustly handled based on game rules (e.g. UNO "draw and play" or "draw and pass")
+
+            } else {
+                console.log("Deck is empty, cannot draw.");
+                // Optionally emit an event to player if they can't draw
+            }
+        }
+        room.gameState = updatedGameState;
+    } else if (data.data) {
+        // For other actions OR if gameState wasn't there OR if it's not a play-card/draw-card action handled above
+        // This is a fallback to merge client data if no specific server logic applied.
+        // It's important that play-card and draw-card actions are fully handled above to avoid this.
+        room.gameState = { ...room.gameState, ...data.data };
+        updatedGameState = room.gameState;
     }
+
 
     // Create the game update with complete data
     const gameUpdate = {
       action,
-      data: data.data, // Send the complete data payload
-      playerId: playerSockets[socket.id]?.playerId,
+      data: updatedGameState, // Send the server-processed game state
+      playerId: currentPlayerId,
       playerName: playerSockets[socket.id]?.playerName,
       timestamp: Date.now(),
       actionId: loggedActionId,
@@ -407,7 +606,26 @@ io.on("connection", (socket) => {
   // Send initial room list when client connects
   const roomList = Object.values(gameRooms)
   socket.emit("room-list", roomList)
-})
+  })
+
+  // Handle request for full game state
+  socket.on("request-full-game-state", ({ roomId }) => {
+    const room = gameRooms[roomId]
+    const playerInfo = playerSockets[socket.id]
+
+    if (room && room.gameState) {
+      if (playerInfo && room.players.some(p => p.id === playerInfo.playerId)) {
+        console.log(`📤 Sending full game state to ${playerInfo.playerName} (${socket.id}) for room ${roomId}`)
+        socket.emit("full-game-state", { gameState: room.gameState })
+      } else {
+        console.warn(`⚠️ User ${socket.id} (Player ID: ${playerInfo?.playerId}) requested game state for room ${roomId} but is not in it or room has no game state.`)
+        socket.emit("game-state-error", { message: "You are not part of this game or game state is unavailable." })
+      }
+    } else {
+      console.warn(`⚠️ Full game state requested for non-existent room or game: ${roomId}`)
+      socket.emit("game-state-error", { message: "Game state not found." })
+    }
+  })
 
 // Cleanup old rooms periodically (every 30 minutes)
 setInterval(
