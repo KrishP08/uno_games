@@ -200,24 +200,25 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       const handleGameUpdate = (data) => {
         console.log("🎮 Game update received:", data)
 
-        // Prevent processing our own updates
-        if (data.playerId === playerId) {
-          console.log("Ignoring own update")
-          return
-        }
-
-        // Prevent duplicate processing
+        // Prevent duplicate processing of the same action event.
+        // Own updates should still be processed to reflect server's authoritative state.
         if (data.actionId && processedActions.has(data.actionId)) {
           console.log("Ignoring duplicate action:", data.action)
           return
         }
 
+        // Add actionId to processed set, even for own actions, to ensure idempotency if server somehow sends it multiple times.
         if (data.actionId) {
           processedActions.add(data.actionId)
-          if (processedActions.size > 100) {
+          if (processedActions.size > 100) { // Limit size of the set
             const firstAction = processedActions.values().next().value
             processedActions.delete(firstAction)
           }
+        }
+
+        // Log if the update is from the current player for easier debugging
+        if (data.playerId === playerId) {
+          console.log("Processing own game update from server:", data.action)
         }
 
         setSyncInProgress(true)
@@ -250,175 +251,17 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
             setGameMessage("New round started!")
             break
 
+          // For most actions, the server sends the complete new game state.
+          // We can use a common handler to update all relevant local states.
+          // The 'data.data' from game-update IS the new gameState from the server.
           case "PLAY_CARD":
-            if (data.data && data.data.card) {
-              const {
-                card,
-                playerHand,
-                discardPile: updatedDiscardPile,
-                currentPlayerIndex: newPlayerIndex,
-                direction: newDirection,
-                stackedCards: newStackedCards,
-                canStack: newCanStack,
-                pendingDrawCount: newPendingDrawCount,
-                specialEffect,
-              } = data.data
-
-              console.log(`🃏 ${data.playerName} played ${card.color} ${card.value}`)
-
-              // Update the player's hand
-              setPlayerHands((prev) => ({
-                ...prev,
-                [data.playerName]: playerHand || [],
-              }))
-
-              // Update discard pile
-              if (updatedDiscardPile && updatedDiscardPile.length > 0) {
-                setDiscardPile(updatedDiscardPile)
-              }
-
-              // Update current player index
-              if (newPlayerIndex !== undefined) {
-                setCurrentPlayerIndex(newPlayerIndex)
-                console.log(`🔄 Turn changed to player index: ${newPlayerIndex}`)
-              }
-
-              // Update direction if changed
-              if (newDirection !== undefined) {
-                setDirection(newDirection)
-              }
-
-              // Update stacking state
-              if (newStackedCards !== undefined) {
-                setStackedCards(newStackedCards)
-              }
-              if (newCanStack !== undefined) {
-                setCanStack(newCanStack)
-              }
-              if (newPendingDrawCount !== undefined) {
-                setPendingDrawCount(newPendingDrawCount)
-              }
-
-              // Reset turn state
-              setDrawnThisTurn(0)
-              setMustPlayDrawnCard(false)
-              setTurnInProgress(false)
-              setActionInProgress(false)
-
-              // Set game message
-              let message = `${data.playerName} played ${card.color} ${card.value}`
-              if (specialEffect?.skipTurn) message += ` - Turn skipped!`
-              if (newDirection !== direction) message += " - Direction reversed!"
-              if (specialEffect?.drawCardCount > 0)
-                message += ` - ${specialEffect.targetPlayer} must draw ${specialEffect.drawCardCount} cards!`
-
-              setGameMessage(message)
-              playCardSound()
-            }
-            break
-
           case "DRAW_CARDS":
-            if (data.data && data.playerId !== playerId) {
-              const { player, numCards, drawnCards, newDeck, pendingDrawCount: newPendingDrawCount } = data.data
-              console.log(`🎴 ${player} drew ${numCards} cards`)
-
-              // Update player's hand with exact cards from server
-              if (drawnCards && Array.isArray(drawnCards)) {
-                setPlayerHands((prev) => {
-                  const currentHand = prev[player] || []
-                  return {
-                    ...prev,
-                    [player]: [...currentHand, ...drawnCards],
-                  }
-                })
-              }
-
-              // Update deck if provided
-              if (newDeck) {
-                setDeck(newDeck)
-              }
-
-              // Update pending draw count
-              if (newPendingDrawCount !== undefined) {
-                setPendingDrawCount(newPendingDrawCount)
-              }
-
-              // Reset UNO state for player who drew cards
-              setPlayerSaidUno((prev) => ({
-                ...prev,
-                [player]: false,
-              }))
-
-              setGameMessage(`${player} drew ${numCards} card${numCards > 1 ? "s" : ""}`)
-            }
-            break
-
-          case "TURN_CHANGE":
-            if (data.data && data.data.currentPlayerIndex !== undefined) {
-              console.log(`🔄 Turn changed to player index: ${data.data.currentPlayerIndex}`)
-              setCurrentPlayerIndex(data.data.currentPlayerIndex)
-              setDrawnThisTurn(0)
-              setMustPlayDrawnCard(false)
-              setIsDrawingCards(false)
-              setTurnInProgress(false)
-              setActionInProgress(false)
-            }
-            break
-
-          case "UNO_CALL":
-            if (data.data && data.data.player) {
-              console.log(`🔊 ${data.data.player} said UNO!`)
-              setPlayerSaidUno((prev) => ({
-                ...prev,
-                [data.data.player]: true,
-              }))
-              setGameMessage(`${data.data.player} said UNO!`)
-              playUnoSound()
-            }
-            break
-
-          case "UNO_CHALLENGE":
-            if (data.data) {
-              const { challenger, target, success } = data.data
-              if (success) {
-                setGameMessage(
-                  `${challenger} successfully challenged ${target}! ${target} draws 2 cards for not saying UNO!`,
-                )
-              } else {
-                setGameMessage(`${challenger} failed to challenge ${target}. ${challenger} draws 2 cards as penalty!`)
-              }
-            }
-            break
-
           case "WILD_COLOR_SELECT":
-            if (data.data && data.data.card) {
-              const { card, currentPlayerIndex: newPlayerIndex } = data.data
-
-              console.log(`🌈 ${data.playerName} selected color: ${card.color}`)
-
-              // Update the discard pile with the colored wild card
-              setDiscardPile((prev) => {
-                const newPile = [...prev]
-                if (newPile.length > 0) {
-                  newPile[newPile.length - 1] = card
-                } else {
-                  newPile.push(card)
-                }
-                return newPile
-              })
-
-              // Update current player
-              if (newPlayerIndex !== undefined) {
-                setCurrentPlayerIndex(newPlayerIndex)
-              }
-
-              setGameMessage(`${data.playerName} changed the color to ${card.color}!`)
-            }
-            break
-
-          case "GAME_STATE_SYNC":
+          case "TURN_CHANGE": // If TURN_CHANGE also includes full state
+          case "UNO_CHALLENGE": // If this results in draws and state change
+          case "GAME_STATE_SYNC": // Explicit full sync
             if (data.data) {
-              console.log("🔄 Received complete game state sync")
+              console.log(`🔄 [GameUpdate] Applying full state for action: ${data.action}. Player: ${data.playerName}, Action ID: ${data.actionId}`);
               const {
                 deck,
                 playerHands,
@@ -444,7 +287,7 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
               setGameMessage("Game state synchronized")
             }
             break
-
+          // Note: ROUND_WIN might also benefit from the full state update pattern if scores/hands are part of data.data
           case "ROUND_WIN":
             if (data.data && data.data.winner) {
               const { winner, newScores } = data.data
@@ -1160,14 +1003,16 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       setMustPlayDrawnCard(false)
       setIsDrawingCards(false)
 
-      // Remove card from player's hand
-      const newHand = [...playerHands[playerName]]
-      newHand.splice(cardIndex, 1)
+      // Card removal from hand will now be handled by the game-update from the server.
+      // This ensures the UI reflects the server's authoritative state.
+      // const newHand = [...playerHands[playerName]]
+      // newHand.splice(cardIndex, 1)
+      // setPlayerHands((prevHands) => ({
+      // ...prevHands,
+      // [playerName]: newHand,
+      // }))
+      const currentHandBeforePlaying = playerHands[playerName] || [];
 
-      setPlayerHands((prevHands) => ({
-        ...prevHands,
-        [playerName]: newHand,
-      }))
 
       // For wild cards, show color selector
       if (card.color === "wild") {
@@ -1177,8 +1022,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
         sendGameAction("PLAY_CARD", {
           card: { ...card },
           playerName,
-          playerHand: newHand,
-          discardPile: [...discardPile],
+          // playerHand: newHand, // We don't send the modified hand from client anymore
+          discardPile: [...discardPile], // Client can still predict this
           isWildCard: true,
         })
 
@@ -1186,6 +1031,8 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       }
 
       // Calculate next player and handle special cards
+      // Note: newHand is not defined here anymore for sending to server.
+      // Server will determine the new hand state.
       let nextPlayerIndex = getNextPlayerIndex()
       let newDirection = direction
       let skipTurn = false
@@ -1251,10 +1098,10 @@ export function GameRoom({ room, playerName, playerId, onLeaveRoom, gameMode, so
       // Send comprehensive game action
       sendGameAction("PLAY_CARD", {
         card,
-        cardIndex,
+        cardIndex, // Client can still send the index of card it attempted to play from its current hand view
         playerName,
-        playerHand: newHand,
-        discardPile: newDiscardPile,
+        // playerHand: newHand, // Server calculates the new hand
+        discardPile: newDiscardPile, // Client can predict this for server to validate against
         currentPlayerIndex: nextPlayerIndex,
         direction: newDirection,
         stackedCards: newStackedCards,
