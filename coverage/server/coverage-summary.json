@@ -1,0 +1,3 @@
+{"total": {"lines":{"total":304,"covered":23,"skipped":0,"pct":7.56},"statements":{"total":323,"covered":23,"skipped":0,"pct":7.12},"functions":{"total":32,"covered":1,"skipped":0,"pct":3.12},"branches":{"total":176,"covered":6,"skipped":0,"pct":3.4},"branchesTrue":{"total":0,"covered":0,"skipped":0,"pct":"Unknown"}}
+,"/app/server/server.js": {"lines":{"total":304,"covered":23,"skipped":0,"pct":7.56},"functions":{"total":32,"covered":1,"skipped":0,"pct":3.12},"statements":{"total":323,"covered":23,"skipped":0,"pct":7.12},"branches":{"total":176,"covered":6,"skipped":0,"pct":3.4}}
+}
